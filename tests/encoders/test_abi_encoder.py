@@ -2,6 +2,7 @@ import torch
 import unittest
 from lightning_ocr.models.encoders.abi_encoder import ABIEncoder
 
+
 class TestABIEncoder(unittest.TestCase):
     def test_init(self):
         with self.assertRaises(AssertionError):

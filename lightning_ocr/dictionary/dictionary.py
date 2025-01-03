@@ -1,5 +1,6 @@
 from typing import List, Sequence
 
+
 class Dictionary:
     """The class generates a dictionary for recognition. It pre-defines four
     special tokens: ``start_token``, ``end_token``, ``pad_token``, and
@@ -31,18 +32,20 @@ class Dictionary:
             skipped when converting string to index. Defaults to '<UKN>'.
     """
 
-    def __init__(self,
-                 dict_list: list[str],
-                 with_start: bool = False,
-                 with_end: bool = False,
-                 same_start_end: bool = False,
-                 with_padding: bool = False,
-                 with_unknown: bool = False,
-                 start_token: str = '<BOS>',
-                 end_token: str = '<EOS>',
-                 start_end_token: str = '<BOS/EOS>',
-                 padding_token: str = '<PAD>',
-                 unknown_token: str = '<UKN>') -> None:
+    def __init__(
+        self,
+        dict_list: list[str],
+        with_start: bool = False,
+        with_end: bool = False,
+        same_start_end: bool = False,
+        with_padding: bool = False,
+        with_unknown: bool = False,
+        start_token: str = "<BOS>",
+        end_token: str = "<EOS>",
+        start_end_token: str = "<BOS/EOS>",
+        padding_token: str = "<PAD>",
+        unknown_token: str = "<UKN>",
+    ) -> None:
         self.with_start = with_start
         self.with_end = with_end
         self.same_start_end = same_start_end
@@ -56,24 +59,26 @@ class Dictionary:
 
         self._dict = []
         for line_num, line in enumerate(dict_list):
-            line = line.strip('\r\n')
+            line = line.strip("\r\n")
             if len(line) > 1:
-                raise ValueError('Expect each line has 0 or 1 character, '
-                                 f'got {len(line)} characters '
-                                 f'at line {line_num + 1}')
-            if line != '':
+                raise ValueError(
+                    "Expect each line has 0 or 1 character, "
+                    f"got {len(line)} characters "
+                    f"at line {line_num + 1}"
+                )
+            if line != "":
                 self._dict.append(line)
 
         self._char2idx = {char: idx for idx, char in enumerate(self._dict)}
 
         self._update_dict()
-        assert len(set(self._dict)) == len(self._dict), \
-            'Invalid dictionary: Has duplicated characters.'
+        assert len(set(self._dict)) == len(
+            self._dict
+        ), "Invalid dictionary: Has duplicated characters."
 
     @property
     def num_classes(self) -> int:
-        """int: Number of output classes. Special tokens are counted.
-        """
+        """int: Number of output classes. Special tokens are counted."""
         return len(self._dict)
 
     @property
@@ -100,10 +105,12 @@ class Dictionary:
             elif not strict:
                 return None
             else:
-                raise Exception(f'Chararcter: {char} not in dict,'
-                                ' please check gt_label and use'
-                                ' custom dict file,'
-                                ' or set "with_unknown=True"')
+                raise Exception(
+                    f"Chararcter: {char} not in dict,"
+                    " please check gt_label and use"
+                    " custom dict file,"
+                    ' or set "with_unknown=True"'
+                )
         return char_idx
 
     def str2idx(self, string: str) -> List:
@@ -121,10 +128,12 @@ class Dictionary:
             if char_idx is None:
                 if self.with_unknown:
                     continue
-                raise Exception(f'Chararcter: {s} not in dict,'
-                                ' please check gt_label and use'
-                                ' custom dict file,'
-                                ' or set "with_unknown=True"')
+                raise Exception(
+                    f"Chararcter: {s} not in dict,"
+                    " please check gt_label and use"
+                    " custom dict file,"
+                    ' or set "with_unknown=True"'
+                )
             idx.append(char_idx)
         return idx
 
@@ -138,10 +147,12 @@ class Dictionary:
             str: The converted string.
         """
         assert isinstance(index, (list, tuple))
-        string = ''
+        string = ""
         for i in index:
-            assert i < len(self._dict), f'Index: {i} out of range! Index ' \
-                                        f'must be less than {len(self._dict)}'
+            assert i < len(self._dict), (
+                f"Index: {i} out of range! Index "
+                f"must be less than {len(self._dict)}"
+            )
             string += self._dict[i]
         return string
 

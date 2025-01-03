@@ -25,12 +25,12 @@ class EncoderDecoderRecognizer(L.LightningModule):
         inputs, data_samples = batch
 
         out_enc = self.forward(inputs)
-        
+
         losses = self.loss_fn(out_enc, data_samples)
         total_loss = torch.sum(torch.stack(list(losses.values())))
-        
+
         losses["total_loss"] = total_loss
 
         self.log_dict(losses, on_step=True)
-        
+
         return total_loss

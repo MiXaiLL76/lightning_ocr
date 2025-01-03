@@ -2,6 +2,7 @@ import math
 import torch
 import torch.nn as nn
 
+
 class BasicBlock(nn.Module):
     expansion = 1
 
@@ -10,7 +11,9 @@ class BasicBlock(nn.Module):
         self.conv1x1 = nn.Conv2d(inplanes, planes, kernel_size=1, stride=1, bias=False)
         self.bn1 = nn.BatchNorm2d(planes)
         self.relu = nn.ReLU(inplace=True)
-        self.conv3x3 = nn.Conv2d(planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.conv3x3 = nn.Conv2d(
+            planes, planes, kernel_size=3, stride=stride, padding=1, bias=False
+        )
         self.bn2 = nn.BatchNorm2d(planes)
         self.downsample = downsample
         self.stride = stride
@@ -33,20 +36,23 @@ class BasicBlock(nn.Module):
 
         return out
 
+
 class ResNetABI(nn.Module):
-    def __init__(self,
-                 in_channels=3,
-                 stem_channels=32,
-                 base_channels=32,
-                 arch_settings=[3, 4, 6, 6, 3],
-                 strides=[2, 1, 2, 1, 1],
-                 ):
-        
+    def __init__(
+        self,
+        in_channels=3,
+        stem_channels=32,
+        base_channels=32,
+        arch_settings=[3, 4, 6, 6, 3],
+        strides=[2, 1, 2, 1, 1],
+    ):
         super(ResNetABI, self).__init__()
-        
+
         self.base_channels = base_channels
 
-        self.conv1 = nn.Conv2d(in_channels, stem_channels, kernel_size=3, stride=1, padding=1, bias=False)
+        self.conv1 = nn.Conv2d(
+            in_channels, stem_channels, kernel_size=3, stride=1, padding=1, bias=False
+        )
         self.bn1 = nn.BatchNorm2d(stem_channels)
         self.relu = nn.ReLU(inplace=True)
 
@@ -59,7 +65,7 @@ class ResNetABI(nn.Module):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-                m.weight.data.normal_(0, math.sqrt(2. / n))
+                m.weight.data.normal_(0, math.sqrt(2.0 / n))
             elif isinstance(m, nn.BatchNorm2d):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
@@ -68,8 +74,13 @@ class ResNetABI(nn.Module):
         downsample = None
         if stride != 1 or self.base_channels != channels * BasicBlock.expansion:
             downsample = nn.Sequential(
-                nn.Conv2d(self.base_channels, channels * BasicBlock.expansion,
-                          kernel_size=1, stride=stride, bias=False),
+                nn.Conv2d(
+                    self.base_channels,
+                    channels * BasicBlock.expansion,
+                    kernel_size=1,
+                    stride=stride,
+                    bias=False,
+                ),
                 nn.BatchNorm2d(channels * BasicBlock.expansion),
             )
 
@@ -80,8 +91,8 @@ class ResNetABI(nn.Module):
             layers.append(BasicBlock(self.base_channels, channels))
 
         return nn.Sequential(*layers)
-    
-    def forward(self, x : torch.Tensor):
+
+    def forward(self, x: torch.Tensor):
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)

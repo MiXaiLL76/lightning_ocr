@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from ...dictionary.dictionary import Dictionary
 
+
 class BaseTextRecogModuleLoss(nn.Module):
     """Base recognition loss.
 
@@ -26,44 +27,47 @@ class BaseTextRecogModuleLoss(nn.Module):
             - 'none': Do not pad gt texts.
     """
 
-    def __init__(self,
-                 dictionary: Dictionary,
-                 max_seq_len: int = 40,
-                 letter_case: str = 'unchanged',
-                 pad_with: str = 'auto',
-                 **kwargs) -> None:
+    def __init__(
+        self,
+        dictionary: Dictionary,
+        max_seq_len: int = 40,
+        letter_case: str = "unchanged",
+        pad_with: str = "auto",
+        **kwargs,
+    ) -> None:
         super().__init__()
-        
+
         self.dictionary = dictionary
         self.max_seq_len = max_seq_len
-        assert letter_case in ['unchanged', 'upper', 'lower']
+        assert letter_case in ["unchanged", "upper", "lower"]
         self.letter_case = letter_case
 
-        assert pad_with in ['auto', 'padding', 'end', 'none']
-        if pad_with == 'auto':
-            self.pad_idx = self.dictionary.padding_idx or \
-                self.dictionary.end_idx
-        elif pad_with == 'padding':
+        assert pad_with in ["auto", "padding", "end", "none"]
+        if pad_with == "auto":
+            self.pad_idx = self.dictionary.padding_idx or self.dictionary.end_idx
+        elif pad_with == "padding":
             self.pad_idx = self.dictionary.padding_idx
-        elif pad_with == 'end':
+        elif pad_with == "end":
             self.pad_idx = self.dictionary.end_idx
         else:
             self.pad_idx = None
-        if self.pad_idx is None and pad_with != 'none':
-            if pad_with == 'auto':
-                raise ValueError('pad_with="auto", but dictionary.end_idx'
-                                 ' and dictionary.padding_idx are both None')
+        if self.pad_idx is None and pad_with != "none":
+            if pad_with == "auto":
+                raise ValueError(
+                    'pad_with="auto", but dictionary.end_idx'
+                    " and dictionary.padding_idx are both None"
+                )
             else:
                 raise ValueError(
-                    f'pad_with="{pad_with}", but dictionary.{pad_with}_idx is'
-                    ' None')
+                    f'pad_with="{pad_with}", but dictionary.{pad_with}_idx is' " None"
+                )
 
-    def get_targets(self, data_samples : list[dict]):
+    def get_targets(self, data_samples: list[dict]):
         for data_sample in data_samples:
-            if data_sample.get('have_target', False):
+            if data_sample.get("have_target", False):
                 continue
             text = data_sample["gt_text"]
-            if self.letter_case in ['upper', 'lower']:
+            if self.letter_case in ["upper", "lower"]:
                 text = getattr(text, self.letter_case)()
             indexes = self.dictionary.str2idx(text)
             indexes = torch.LongTensor(indexes)
@@ -83,8 +87,7 @@ class BaseTextRecogModuleLoss(nn.Module):
                 slice_end = src_target.size(0) - 1
             src_target = src_target[slice_start:slice_end]
             if self.pad_idx is not None:
-                padded_indexes = (torch.ones(self.max_seq_len) *
-                                  self.pad_idx).long()
+                padded_indexes = (torch.ones(self.max_seq_len) * self.pad_idx).long()
                 char_num = min(src_target.size(0), self.max_seq_len)
                 padded_indexes[:char_num] = src_target[:char_num]
             else:

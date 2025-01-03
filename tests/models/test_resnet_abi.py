@@ -3,8 +3,8 @@ import torch
 
 from lightning_ocr.models.backbones.resnet_abi import ResNetABI
 
-class TestResNetABI(TestCase):
 
+class TestResNetABI(TestCase):
     def test_forward(self):
         """Test resnet backbone."""
         with self.assertRaises(ValueError):

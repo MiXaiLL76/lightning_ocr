@@ -8,6 +8,7 @@ from ...dictionary.dictionary import Dictionary
 
 from .base import BaseTextRecogModuleLoss
 
+
 class CEModuleLoss(BaseTextRecogModuleLoss):
     """Implementation of loss module for encoder-decoder based text recognition
     method with CrossEntropy loss.
@@ -53,23 +54,26 @@ class CEModuleLoss(BaseTextRecogModuleLoss):
             Defaults to False.
     """
 
-    def __init__(self,
-                 dictionary: Dictionary,
-                 max_seq_len: int = 40,
-                 letter_case: str = 'unchanged',
-                 pad_with: str = 'auto',
-                 ignore_char: Union[int, str] = 'padding',
-                 flatten: bool = False,
-                 reduction: str = 'none',
-                 ignore_first_char: bool = False):
+    def __init__(
+        self,
+        dictionary: Dictionary,
+        max_seq_len: int = 40,
+        letter_case: str = "unchanged",
+        pad_with: str = "auto",
+        ignore_char: Union[int, str] = "padding",
+        flatten: bool = False,
+        reduction: str = "none",
+        ignore_first_char: bool = False,
+    ):
         super().__init__(
             dictionary=dictionary,
             max_seq_len=max_seq_len,
             letter_case=letter_case,
-            pad_with=pad_with)
+            pad_with=pad_with,
+        )
         assert isinstance(ignore_char, (int, str))
         assert isinstance(reduction, str)
-        assert reduction in ['none', 'mean', 'sum']
+        assert reduction in ["none", "mean", "sum"]
         assert isinstance(ignore_first_char, bool)
         assert isinstance(flatten, bool)
         self.flatten = flatten
@@ -80,28 +84,29 @@ class CEModuleLoss(BaseTextRecogModuleLoss):
             ignore_index = ignore_char
         else:
             mapping_table = {
-                'none': -1,
-                'start': self.dictionary.start_idx,
-                'padding': self.dictionary.padding_idx,
-                'end': self.dictionary.end_idx,
-                'unknown': self.dictionary.unknown_idx,
+                "none": -1,
+                "start": self.dictionary.start_idx,
+                "padding": self.dictionary.padding_idx,
+                "end": self.dictionary.end_idx,
+                "unknown": self.dictionary.unknown_idx,
             }
 
             ignore_index = mapping_table.get(
-                ignore_char,
-                self.dictionary.char2idx(ignore_char, strict=False))
-            if ignore_index is None or (ignore_index
-                                        == self.dictionary.unknown_idx
-                                        and ignore_char != 'unknown'):
+                ignore_char, self.dictionary.char2idx(ignore_char, strict=False)
+            )
+            if ignore_index is None or (
+                ignore_index == self.dictionary.unknown_idx and ignore_char != "unknown"
+            ):
                 warnings.warn(
-                    f'{ignore_char} does not exist in the dictionary',
-                    UserWarning)
+                    f"{ignore_char} does not exist in the dictionary", UserWarning
+                )
                 ignore_index = -1
 
         self.ignore_char = ignore_char
         self.ignore_index = ignore_index
         self.loss_ce = nn.CrossEntropyLoss(
-            ignore_index=ignore_index, reduction=reduction)
+            ignore_index=ignore_index, reduction=reduction
+        )
 
     def forward(self, outputs: torch.Tensor, data_samples: list[dict]) -> Dict:
         """
@@ -114,7 +119,7 @@ class CEModuleLoss(BaseTextRecogModuleLoss):
         """
         targets = list()
         for data_sample in data_samples:
-            targets.append(data_sample['padded_indexes'])
+            targets.append(data_sample["padded_indexes"])
         targets = torch.stack(targets, dim=0).long()
         if self.ignore_first_char:
             targets = targets[:, 1:].contiguous()
