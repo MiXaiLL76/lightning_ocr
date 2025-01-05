@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from typing import Dict, Optional, Tuple
-from ..modules.transformer_module import PositionalEncoding
+from lightning_ocr.models.modules.transformer_module import PositionalEncoding
 
 
 class ABIVisionDecoder(nn.Module):
@@ -24,8 +24,6 @@ class ABIVisionDecoder(nn.Module):
             U-Net. Defaults to 'nearest'.
         max_seq_len (int): Maximum sequence length. The
             sequence is usually generated from decoder. Defaults to 40.
-        init_cfg (dict or list[dict], optional): Initialization configs.
-            Defaults to dict(type='Xavier', layer='Conv2d').
     """
 
     def __init__(
@@ -38,7 +36,7 @@ class ABIVisionDecoder(nn.Module):
         attn_mode: str = "nearest",
         max_seq_len: int = 40,
     ) -> None:
-        super(ABIVisionDecoder, self).__init__()
+        super().__init__()
 
         self.max_seq_len = max_seq_len
 

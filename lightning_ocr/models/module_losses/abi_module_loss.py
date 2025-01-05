@@ -2,9 +2,9 @@ from typing import Dict, Union
 
 import torch
 
-from ...dictionary.dictionary import Dictionary
-from .base import BaseTextRecogModuleLoss
-from .ce_module_loss import CEModuleLoss
+from lightning_ocr.dictionary.dictionary import Dictionary
+from lightning_ocr.models.module_losses.base import BaseTextRecogModuleLoss
+from lightning_ocr.models.module_losses.ce_module_loss import CEModuleLoss
 
 
 class ABIModuleLoss(BaseTextRecogModuleLoss):

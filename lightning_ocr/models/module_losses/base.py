@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from ...dictionary.dictionary import Dictionary
+from lightning_ocr.dictionary.dictionary import Dictionary
 
 
 class BaseTextRecogModuleLoss(nn.Module):

@@ -4,9 +4,8 @@ from typing import Dict, Union
 import torch
 import torch.nn as nn
 
-from ...dictionary.dictionary import Dictionary
-
-from .base import BaseTextRecogModuleLoss
+from lightning_ocr.dictionary.dictionary import Dictionary
+from lightning_ocr.models.module_losses.base import BaseTextRecogModuleLoss
 
 
 class CEModuleLoss(BaseTextRecogModuleLoss):

@@ -7,7 +7,7 @@ class BasicBlock(nn.Module):
     expansion = 1
 
     def __init__(self, inplanes, planes, stride=1, downsample=None):
-        super(BasicBlock, self).__init__()
+        super().__init__()
         self.conv1x1 = nn.Conv2d(inplanes, planes, kernel_size=1, stride=1, bias=False)
         self.bn1 = nn.BatchNorm2d(planes)
         self.relu = nn.ReLU(inplace=True)
@@ -46,8 +46,7 @@ class ResNetABI(nn.Module):
         arch_settings=[3, 4, 6, 6, 3],
         strides=[2, 1, 2, 1, 1],
     ):
-        super(ResNetABI, self).__init__()
-
+        super().__init__()
         self.base_channels = base_channels
 
         self.conv1 = nn.Conv2d(

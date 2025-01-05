@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from ..modules.transformer_module import PositionalEncoding
+from lightning_ocr.models.modules.transformer_module import PositionalEncoding
 
 
 class ABIEncoder(nn.Module):
@@ -29,7 +29,7 @@ class ABIEncoder(nn.Module):
         dropout: float = 0.1,
         max_len: int = 8 * 32,
     ):
-        super(ABIEncoder, self).__init__()
+        super().__init__()
         assert d_model % n_head == 0, "d_model must be divisible by n_head"
 
         self.pos_encoder = PositionalEncoding(d_model, n_position=max_len)
