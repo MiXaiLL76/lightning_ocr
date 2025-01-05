@@ -8,6 +8,7 @@ import albumentations as A
 import cv2
 import matplotlib.pyplot as plt
 
+
 class RecogTextDataset(torch.utils.data.Dataset):
     r"""RecogTextDataset for text recognition.
 
@@ -34,17 +35,18 @@ class RecogTextDataset(torch.utils.data.Dataset):
         pipeline (list, optional): Processing pipeline. Defaults to [].
     """
 
-    def __init__(self,
-                 ann_file: str = '',
-                 parser_cfg: Optional[dict] = {
-                     "dtype" : {'text':str, 'filename' : str},
-                 },
-                 data_root: Optional[str] = '',
-                 data_prefix: dict = dict(img_path=''),
-                 pipeline: List[Callable] = [],
-                 gt_text_row: str = 'text',
-                 image_row: str = 'filename',
-                 ) -> None:
+    def __init__(
+        self,
+        ann_file: str = "",
+        parser_cfg: Optional[dict] = {
+            "dtype": {"text": str, "filename": str},
+        },
+        data_root: Optional[str] = "",
+        data_prefix: dict = dict(img_path=""),
+        pipeline: List[Callable] = [],
+        gt_text_row: str = "text",
+        image_row: str = "filename",
+    ) -> None:
         self.ann_file = ann_file
         self.parser_cfg = parser_cfg
         self.data_root = data_root
@@ -52,7 +54,7 @@ class RecogTextDataset(torch.utils.data.Dataset):
 
         self.gt_text_row = gt_text_row
         self.image_row = image_row
-        
+
         self.data_list = self.load_data_list()
         self.transform = A.Compose(pipeline)
 
@@ -62,13 +64,18 @@ class RecogTextDataset(torch.utils.data.Dataset):
         Returns:
             List[dict]: A list of annotation.
         """
+
         def join_path(row):
-            row[self.image_row] = osp.join(self.data_root, self.data_prefix['img_path'], row[self.image_row])
+            row[self.image_row] = osp.join(
+                self.data_root, self.data_prefix["img_path"], row[self.image_row]
+            )
             return row
-        
-        data_frame = pd.read_json(osp.join(self.data_root, self.ann_file), lines=True, **self.parser_cfg)
+
+        data_frame = pd.read_json(
+            osp.join(self.data_root, self.ann_file), lines=True, **self.parser_cfg
+        )
         data_frame = data_frame.apply(join_path, axis=1)
-        
+
         columns = []
         for col in data_frame.columns:
             if col == self.gt_text_row:
@@ -79,29 +86,30 @@ class RecogTextDataset(torch.utils.data.Dataset):
                 columns.append(col)
         data_frame.columns = columns
 
-        return data_frame.to_dict('records')
+        return data_frame.to_dict("records")
 
     def __getitem__(self, index):
-        item : dict = self.data_list[index]
+        item: dict = self.data_list[index]
         item["index"] = index
-        pillow_image = Image.open(item['filename']).convert("RGB")
-        item['image'] = self.transform(image=np.array(pillow_image))['image']
+        pillow_image = Image.open(item["filename"]).convert("RGB")
+        item["image"] = self.transform(image=np.array(pillow_image))["image"]
         return item
 
     def __len__(self):
         return len(self.data_list)
-    
+
     def collate_fn(self, data_samples):
-        inputs = torch.stack([item['image'] for item in data_samples], dim=0)
+        inputs = torch.stack([item["image"] for item in data_samples], dim=0)
         return inputs, data_samples
 
-def visualize_dataset(data_sample : dict, show : bool = False, return_fig : bool = False) -> np.ndarray:
+
+def visualize_dataset(
+    data_sample: dict, show: bool = False, return_fig: bool = False
+) -> np.ndarray:
     data = cv2.imread(data_sample["filename"])
     fig, ax = plt.subplots()
     ax.imshow(data)
-    title = [
-        f"GT: {data_sample['gt_text']}"
-    ]
+    title = [f"GT: {data_sample['gt_text']}"]
     title_kargs = {}
     if "pred_text" in data_sample:
         title.append(f"DT: {data_sample['pred_text']}")
@@ -109,21 +117,21 @@ def visualize_dataset(data_sample : dict, show : bool = False, return_fig : bool
             title_kargs["color"] = "green"
         else:
             title_kargs["color"] = "red"
-        
+
     ax.set_title("\n".join(title), **title_kargs)
 
     fig.canvas.draw()  # Draw the canvas, cache the renderer
 
     if show:
         plt.show()
-    
+
     if return_fig:
         return fig
-    
+
     # Convert the canvas to a raw RGB buffer
     buf = fig.canvas.buffer_rgba()
     ncols, nrows = fig.canvas.get_width_height()
     image = np.frombuffer(buf, dtype=np.uint8).reshape(nrows, ncols, 4)
     image = cv2.cvtColor(image, cv2.COLOR_RGBA2RGB)
-    
+
     return image

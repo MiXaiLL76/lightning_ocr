@@ -5,12 +5,15 @@ import torch
 
 from lightning_ocr.models.postprocessors.base import BaseTextRecogPostprocessor
 
+
 class CTCPostProcessor(BaseTextRecogPostprocessor):
     """PostProcessor for CTC."""
 
-    def get_single_prediction(self, probs: torch.Tensor,
-                              data_sample: Dict,
-                              ) -> Tuple[Sequence[int], Sequence[float]]:
+    def get_single_prediction(
+        self,
+        probs: torch.Tensor,
+        data_sample: Dict,
+    ) -> Tuple[Sequence[int], Sequence[float]]:
         """Convert the output probabilities of a single image to index and
         score.
 
@@ -24,7 +27,7 @@ class CTCPostProcessor(BaseTextRecogPostprocessor):
         """
         feat_len = probs.size(0)
         max_value, max_idx = torch.max(probs, -1)
-        valid_ratio = data_sample.get('valid_ratio', 1)
+        valid_ratio = data_sample.get("valid_ratio", 1)
         decode_len = min(feat_len, math.ceil(feat_len * valid_ratio))
         index = []
         score = []
@@ -39,8 +42,7 @@ class CTCPostProcessor(BaseTextRecogPostprocessor):
         return index, score
 
     def __call__(
-        self, outputs: torch.Tensor,
-        data_samples: Sequence[Dict]
+        self, outputs: torch.Tensor, data_samples: Sequence[Dict]
     ) -> Sequence[Dict]:
         outputs = outputs.cpu().detach()
         return super().__call__(outputs, data_samples)

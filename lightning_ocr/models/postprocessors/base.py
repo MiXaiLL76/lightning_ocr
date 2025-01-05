@@ -4,6 +4,7 @@ from typing import Sequence, Tuple
 import torch
 from lightning_ocr.dictionary.dictionary import Dictionary
 
+
 class BaseTextRecogPostprocessor:
     """Base text recognition postprocessor.
 
@@ -19,38 +20,42 @@ class BaseTextRecogPostprocessor:
             tokens in the dictionary.
     """
 
-    def __init__(self,
-                 dictionary: Dictionary,
-                 max_seq_len: int = 40,
-                 ignore_chars: Sequence[str] = ['padding'],
-                 **kwargs) -> None:
-
+    def __init__(
+        self,
+        dictionary: Dictionary,
+        max_seq_len: int = 40,
+        ignore_chars: Sequence[str] = ["padding"],
+        **kwargs,
+    ) -> None:
         self.dictionary = dictionary
         self.max_seq_len = max_seq_len
 
         mapping_table = {
-            'padding': self.dictionary.padding_idx,
-            'end': self.dictionary.end_idx,
-            'unknown': self.dictionary.unknown_idx,
+            "padding": self.dictionary.padding_idx,
+            "end": self.dictionary.end_idx,
+            "unknown": self.dictionary.unknown_idx,
         }
 
         ignore_indexes = list()
         for ignore_char in ignore_chars:
-            assert isinstance(ignore_char, str), 'ignore_chars must be list of str'
+            assert isinstance(ignore_char, str), "ignore_chars must be list of str"
 
             index = mapping_table.get(
-                ignore_char,
-                self.dictionary.char2idx(ignore_char, strict=False))
-            if index is None or (index == self.dictionary.unknown_idx
-                                 and ignore_char != 'unknown'):
+                ignore_char, self.dictionary.char2idx(ignore_char, strict=False)
+            )
+            if index is None or (
+                index == self.dictionary.unknown_idx and ignore_char != "unknown"
+            ):
                 warnings.warn(
-                    f'{ignore_char} does not exist in the dictionary',
-                    UserWarning)
+                    f"{ignore_char} does not exist in the dictionary", UserWarning
+                )
                 continue
             ignore_indexes.append(index)
         self.ignore_indexes = ignore_indexes
 
-    def get_single_prediction(self,probs: torch.Tensor,data_sample: dict = None) -> Tuple[Sequence[int], Sequence[float]]:
+    def get_single_prediction(
+        self, probs: torch.Tensor, data_sample: dict = None
+    ) -> Tuple[Sequence[int], Sequence[float]]:
         """Convert the output probabilities of a single image to index and
         score.
 
@@ -80,9 +85,11 @@ class BaseTextRecogPostprocessor:
         batch_size = probs.size(0)
 
         for idx in range(batch_size):
-            index, score = self.get_single_prediction(probs[idx, :, :], data_samples[idx])
+            index, score = self.get_single_prediction(
+                probs[idx, :, :], data_samples[idx]
+            )
             text = self.dictionary.idx2str(index)
             data_samples[idx]["pred_text"] = text
             data_samples[idx]["pred_score"] = score
-            
+
         return data_samples

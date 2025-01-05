@@ -4,6 +4,7 @@ from typing import Any, List, Optional, Sequence, Union
 from torch import Tensor
 import warnings
 
+
 class BaseMetric(metaclass=ABCMeta):
     """Base class for a metric.
 
@@ -24,12 +25,14 @@ class BaseMetric(metaclass=ABCMeta):
 
     default_prefix: Optional[str] = None
 
-    def __init__(self,prefix: Optional[str] = None) -> None:
+    def __init__(self, prefix: Optional[str] = None) -> None:
         self._dataset_meta: Union[None, dict] = None
         self.results: List[Any] = []
         self.prefix = prefix or self.default_prefix
         if self.prefix is None:
-            warnings.warn('The prefix is not set in metric class 'f'{self.__class__.__name__}.')
+            warnings.warn(
+                "The prefix is not set in metric class " f"{self.__class__.__name__}."
+            )
 
     @property
     def dataset_meta(self) -> Optional[dict]:
@@ -82,19 +85,17 @@ class BaseMetric(metaclass=ABCMeta):
         """
         if len(self.results) == 0:
             warnings.warn(
-                f'{self.__class__.__name__} got empty `self.results`. Please '
-                'ensure that the processed results are properly added into '
-                '`self.results` in `process` method.')
+                f"{self.__class__.__name__} got empty `self.results`. Please "
+                "ensure that the processed results are properly added into "
+                "`self.results` in `process` method."
+            )
 
         # cast all tensors in results list to cpu
         results = _to_cpu(self.results)
         _metrics = self.compute_metrics(results)  # type: ignore
         # Add prefix to metric names
         if self.prefix:
-            _metrics = {
-                '/'.join((self.prefix, k)): v
-                for k, v in _metrics.items()
-            }
+            _metrics = {"/".join((self.prefix, k)): v for k, v in _metrics.items()}
         metrics = [_metrics]
 
         # reset the results list
@@ -105,7 +106,7 @@ class BaseMetric(metaclass=ABCMeta):
 def _to_cpu(data: Any) -> Any:
     """Transfer all tensors and BaseDataElement to cpu."""
     if isinstance(data, (Tensor)):
-        return data.to('cpu')
+        return data.to("cpu")
     elif isinstance(data, list):
         return [_to_cpu(d) for d in data]
     elif isinstance(data, tuple):
