@@ -15,41 +15,42 @@ from lightning_ocr.dictionary.dictionary import Dictionary
 from lightning_ocr.metrics.recog_metric import WordMetric, OneMinusNEDMetric, CharMetric
 from torch.utils.tensorboard import SummaryWriter
 
+
 # https://huggingface.co/docs/transformers/model_doc/trocr#transformers.TrOCRForCausalLM.forward.example
 class TrOCR(L.LightningModule):
     def __init__(self, config: dict = {}):
         super().__init__()
         self.dictionary = Dictionary(**config.get("dictionary", {}))
 
-        pretrained_model = config.get("pretrained_model", 'microsoft/trocr-small-printed')
-        
+        pretrained_model = config.get(
+            "pretrained_model", "microsoft/trocr-small-printed"
+        )
+
         self.processor = TrOCRProcessor.from_pretrained(pretrained_model)
         self.processor.tokenizer = self.dictionary.fast_tokenizer()
 
         self.cfg = VisionEncoderDecoderConfig.from_pretrained(pretrained_model)
-        
+
         self.max_token_length = config.get("max_seq_len", self.cfg.decoder.max_length)
-        
+
         # DECODER CFG
         self.cfg.decoder.vocab_size = self.processor.tokenizer.vocab_size
         self.cfg.decoder.pad_token_id = self.processor.tokenizer.pad_token_id
         self.cfg.decoder.bos_token_id = self.processor.tokenizer.bos_token_id
         self.cfg.decoder.eos_token_id = self.processor.tokenizer.eos_token_id
         self.cfg.decoder.max_length = self.max_token_length
-        
+
         # ENCODER CFG
         self.cfg.encoder.max_length = self.max_token_length
-        
+
         # MODEL CFG
         self.cfg.decoder_start_token_id = self.processor.tokenizer.eos_token_id
         self.cfg.eos_token_id = self.processor.tokenizer.eos_token_id
         self.cfg.pad_token_id = self.processor.tokenizer.pad_token_id
         self.cfg.vocab_size = self.processor.tokenizer.vocab_size
-        
+
         self.model = VisionEncoderDecoderModel.from_pretrained(
-            pretrained_model, 
-            config=self.cfg,
-            ignore_mismatched_sizes=True
+            pretrained_model, config=self.cfg, ignore_mismatched_sizes=True
         )
 
         self.metrics = [
@@ -57,7 +58,7 @@ class TrOCR(L.LightningModule):
             CharMetric(),
             OneMinusNEDMetric(),
         ]
-        
+
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(
             self.parameters(),
@@ -71,7 +72,7 @@ class TrOCR(L.LightningModule):
             "interval": "epoch",
             "frequency": 1,
         }
-        
+
         scheduler2 = {
             "scheduler": torch.optim.lr_scheduler.MultiStepLR(
                 optimizer, milestones=[16, 18], last_epoch=self.trainer.max_epochs
@@ -85,30 +86,32 @@ class TrOCR(L.LightningModule):
     def tokenizer_encode(self, data_samples):
         def tokenize(samples, tokenizer_class):
             tokens = tokenizer_class(
-                samples, 
-                return_tensors="pt", 
+                samples,
+                return_tensors="pt",
                 pad_to_multiple_of=self.max_token_length,
                 padding=True,
                 max_length=self.max_token_length,
                 truncation=True,
             )
-            labels = tokens['input_ids']
-            labels[tokens['attention_mask'] == 0] = tokenizer_class.eos_token_id
+            labels = tokens["input_ids"]
+            labels[tokens["attention_mask"] == 0] = tokenizer_class.eos_token_id
             return labels
-        
-        samples = [item['gt_text'] for item in data_samples]
+
+        samples = [item["gt_text"] for item in data_samples]
         return tokenize(samples, self.processor.tokenizer)
-    
+
     def training_step(self, batch, batch_idx):
         inputs, data_samples = batch
 
-        pixel_values = self.processor(inputs, return_tensors="pt").pixel_values.to(self.model.device)
+        pixel_values = self.processor(inputs, return_tensors="pt").pixel_values.to(
+            self.model.device
+        )
         labels = self.tokenizer_encode(data_samples).to(self.model.device)
         outputs = self.model(pixel_values, labels=labels)
         losses = {
-            "total" : outputs.loss,
+            "total": outputs.loss,
         }
-        
+
         self.log_dict(
             {f"loss/{key}": val for key, val in losses.items()},
             on_step=True,
@@ -117,29 +120,36 @@ class TrOCR(L.LightningModule):
             batch_size=len(data_samples),
         )
 
-        lr = self.optimizers().param_groups[0]['lr']  # Get current learning rate
-        self.log('learning_rate', lr, on_step=True, prog_bar=True, logger=True)
+        lr = self.optimizers().param_groups[0]["lr"]  # Get current learning rate
+        self.log("learning_rate", lr, on_step=True, prog_bar=True, logger=True)
 
         return outputs.loss
 
     def validation_step(self, batch, batch_idx):
         inputs, data_samples = batch
 
-        pixel_values = self.processor(inputs, return_tensors="pt").pixel_values.to(self.model.device)
-        generated_ids = self.model.generate(pixel_values, max_new_tokens=self.max_token_length)
+        pixel_values = self.processor(inputs, return_tensors="pt").pixel_values.to(
+            self.model.device
+        )
+        generated_ids = self.model.generate(
+            pixel_values, max_new_tokens=self.max_token_length
+        )
         return generated_ids
 
     def on_validation_batch_end(self, outputs, batch, batch_idx):
         inputs, data_samples = batch
 
         def batch_decode(input_ids):
-            return ["".join(self.processor.batch_decode(input_id, skip_special_tokens=True)) for input_id in input_ids]
+            return [
+                "".join(self.processor.batch_decode(input_id, skip_special_tokens=True))
+                for input_id in input_ids
+            ]
 
         generated_ids = batch_decode(outputs)
 
         for idx, data_sample in enumerate(data_samples):
-            data_sample['pred_text'] = generated_ids[idx]
-        
+            data_sample["pred_text"] = generated_ids[idx]
+
         for metric in self.metrics:
             metric.process(None, data_samples)
             eval_res = metric.evaluate(size=len(data_samples))
@@ -158,6 +168,7 @@ class TrOCR(L.LightningModule):
                 f"data_samples/{data_sample['index']}", fig, self.global_step
             )
             break
+
 
 def load_train_pipeline():
     train_pipeline = [
@@ -212,6 +223,7 @@ if __name__ == "__main__":
     from lightning.pytorch.callbacks import ModelCheckpoint
     from lightning.pytorch.loggers import TensorBoardLogger
     import os
+
     os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
     batch_size = 8
@@ -255,26 +267,28 @@ if __name__ == "__main__":
 
     # https://huggingface.co/microsoft/trocr-small-printed/tree/main
     small_cfg = {
-        "dictionary" : dictionary,
-        "pretrained_model" : "microsoft/trocr-small-printed",
+        "dictionary": dictionary,
+        "pretrained_model": "microsoft/trocr-small-printed",
     }
     model = TrOCR(small_cfg)
-    
+
     from sklearn.model_selection import train_test_split
     import copy
-    TRAIN, TEST = train_test_split(train_dataset.data_list, test_size=0.2, random_state=42)
-    
+
+    TRAIN, TEST = train_test_split(
+        train_dataset.data_list, test_size=0.2, random_state=42
+    )
+
     test_dataset = copy.deepcopy(train_dataset)
     test_dataset.data_list = TEST
     test_dataset.transform = A.Compose(load_test_pipeline())
     train_dataset.data_list = TRAIN
 
-    
     trainer.fit(
         model,
         datamodule=RecogTextDataModule(
-            train_datasets=[train_dataset], 
-            eval_datasets=[test_dataset], 
+            train_datasets=[train_dataset],
+            eval_datasets=[test_dataset],
             batch_size=batch_size,
         ),
     )

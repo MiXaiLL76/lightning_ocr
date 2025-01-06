@@ -11,15 +11,16 @@ from torch.utils.tensorboard import SummaryWriter
 from transformers import MgpstrProcessor, MgpstrForSceneTextRecognition, MgpstrConfig
 from lightning_ocr.dictionary.tokenization_mgp_str import MgpstrTokenizer
 
+
 # https://huggingface.co/docs/transformers/v4.33.2/en/model_doc/mgp-str
 class MGP_STR(L.LightningModule):
     def __init__(self, config: dict = {}):
         super().__init__()
-        
+
         char_tokenizer = MgpstrTokenizer(**config.get("tokenizer", {}))
 
-        pretrained_model = config.get("pretrained_model", 'alibaba-damo/mgp-str-base')
-        
+        pretrained_model = config.get("pretrained_model", "alibaba-damo/mgp-str-base")
+
         self.cfg = MgpstrConfig.from_pretrained(pretrained_model)
         self.cfg.num_character_labels = len(char_tokenizer.vocab)
         self.cfg.max_token_length = config.get("max_seq_len", self.cfg.max_token_length)
@@ -28,17 +29,21 @@ class MGP_STR(L.LightningModule):
         self.processor.char_tokenizer = char_tokenizer
 
         # https://github.com/huggingface/transformers/blob/v4.33.2/src/transformers/models/mgp_str/processing_mgp_str.py#L143
-        self.processor.bpe_tokenizer.pad_token_id = self.processor.bpe_tokenizer.eos_token_id
+        self.processor.bpe_tokenizer.pad_token_id = (
+            self.processor.bpe_tokenizer.eos_token_id
+        )
         self.processor.wp_tokenizer.eos_token_id = 102
 
-        self.model = MgpstrForSceneTextRecognition.from_pretrained(pretrained_model, config=self.cfg, ignore_mismatched_sizes=True)
-        
+        self.model = MgpstrForSceneTextRecognition.from_pretrained(
+            pretrained_model, config=self.cfg, ignore_mismatched_sizes=True
+        )
+
         self.metrics = [
             WordMetric(mode=["exact", "ignore_case", "ignore_case_symbol"]),
             CharMetric(),
             OneMinusNEDMetric(),
         ]
-        
+
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(
             self.parameters(),
@@ -47,9 +52,10 @@ class MGP_STR(L.LightningModule):
 
         scheduler = {
             "scheduler": torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, 
-                T_max=self.trainer.max_epochs * len(self.trainer.fit_loop._data_source.instance), 
-                eta_min=1e-7, 
+                optimizer,
+                T_max=self.trainer.max_epochs
+                * len(self.trainer.fit_loop._data_source.instance),
+                eta_min=1e-7,
             ),
             "interval": "step",
             "frequency": 1,
@@ -59,35 +65,38 @@ class MGP_STR(L.LightningModule):
 
     def tokenizer_encode(self, data_samples):
         def tokenize(samples, tokenizer_class):
-
             if tokenizer_class.bos_token is not None:
                 samples = [f"{tokenizer_class.bos_token}{text}" for text in samples]
 
             tokens = tokenizer_class(
-                samples, 
-                return_tensors="pt", 
+                samples,
+                return_tensors="pt",
                 pad_to_multiple_of=self.cfg.max_token_length,
                 padding=True,
                 max_length=self.cfg.max_token_length,
                 truncation=True,
             )
-            labels = tokens['input_ids']
-            labels[tokens['attention_mask'] == 0] = tokenizer_class.eos_token_id
+            labels = tokens["input_ids"]
+            labels[tokens["attention_mask"] == 0] = tokenizer_class.eos_token_id
             return labels
-        
-        samples = [item['gt_text'] for item in data_samples]
+
+        samples = [item["gt_text"] for item in data_samples]
         char_labels = tokenize(samples, self.processor.char_tokenizer)
         bpe_labels = tokenize(samples, self.processor.bpe_tokenizer)
         wp_labels = tokenize(samples, self.processor.wp_tokenizer)
         return char_labels, bpe_labels, wp_labels
-    
+
     def calc_loss(self, pred_logits, target_labels):
-        return torch.nn.functional.cross_entropy(pred_logits.view(-1, pred_logits.size(-1)), target_labels.view(-1))
-    
+        return torch.nn.functional.cross_entropy(
+            pred_logits.view(-1, pred_logits.size(-1)), target_labels.view(-1)
+        )
+
     def training_step(self, batch, batch_idx):
         inputs, data_samples = batch
 
-        pixel_values = self.processor(images=inputs, return_tensors="pt").pixel_values.to(self.model.device)
+        pixel_values = self.processor(
+            images=inputs, return_tensors="pt"
+        ).pixel_values.to(self.model.device)
         outputs = self.model(pixel_values)
 
         char_labels, bpe_labels, wp_labels = self.tokenizer_encode(data_samples)
@@ -97,12 +106,12 @@ class MGP_STR(L.LightningModule):
         loss = char_loss + bpe_loss + wp_loss
 
         losses = {
-            "char_loss" : char_loss,
-            "bpe_loss" : bpe_loss,
-            "wp_loss" : wp_loss,
-            "total" : loss,
+            "char_loss": char_loss,
+            "bpe_loss": bpe_loss,
+            "wp_loss": wp_loss,
+            "total": loss,
         }
-        
+
         self.log_dict(
             {f"loss/{key}": val for key, val in losses.items()},
             on_step=True,
@@ -111,26 +120,28 @@ class MGP_STR(L.LightningModule):
             batch_size=len(data_samples),
         )
 
-        lr = self.optimizers().param_groups[0]['lr']  # Get current learning rate
-        self.log('learning_rate', lr, on_step=True, prog_bar=True, logger=True)
+        lr = self.optimizers().param_groups[0]["lr"]  # Get current learning rate
+        self.log("learning_rate", lr, on_step=True, prog_bar=True, logger=True)
 
         return loss
 
     def validation_step(self, batch, batch_idx):
         inputs, data_samples = batch
 
-        pixel_values = self.processor(images=inputs, return_tensors="pt").pixel_values.to(self.model.device)
+        pixel_values = self.processor(
+            images=inputs, return_tensors="pt"
+        ).pixel_values.to(self.model.device)
         outputs = self.model(pixel_values)
         return outputs
 
     def on_validation_batch_end(self, outputs, batch, batch_idx):
         inputs, data_samples = batch
 
-        generated_text = self.processor.batch_decode(outputs.logits)['generated_text']
+        generated_text = self.processor.batch_decode(outputs.logits)["generated_text"]
 
         for idx, data_sample in enumerate(data_samples):
-            data_sample['pred_text'] = generated_text[idx]
-        
+            data_sample["pred_text"] = generated_text[idx]
+
         for metric in self.metrics:
             metric.process(None, data_samples)
             eval_res = metric.evaluate(size=len(data_samples))
@@ -149,6 +160,7 @@ class MGP_STR(L.LightningModule):
                 f"data_samples/{data_sample['index']}", fig, self.global_step
             )
             break
+
 
 def load_train_pipeline():
     train_pipeline = [
@@ -203,6 +215,7 @@ if __name__ == "__main__":
     from lightning.pytorch.callbacks import ModelCheckpoint
     from lightning.pytorch.loggers import TensorBoardLogger
     import os
+
     os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
     batch_size = 8
@@ -237,28 +250,30 @@ if __name__ == "__main__":
     )
 
     cfg = {
-        "tokenizer" : {
-            "dict_list" : list("0123456789."),
+        "tokenizer": {
+            "dict_list": list("0123456789."),
         },
     }
 
     model = MGP_STR(cfg)
-    
+
     from sklearn.model_selection import train_test_split
     import copy
-    TRAIN, TEST = train_test_split(train_dataset.data_list, test_size=0.2, random_state=42)
-    
+
+    TRAIN, TEST = train_test_split(
+        train_dataset.data_list, test_size=0.2, random_state=42
+    )
+
     test_dataset = copy.deepcopy(train_dataset)
     test_dataset.data_list = TEST
     test_dataset.transform = A.Compose(load_test_pipeline())
     train_dataset.data_list = TRAIN
 
-    
     trainer.fit(
         model,
         datamodule=RecogTextDataModule(
-            train_datasets=[train_dataset], 
-            eval_datasets=[test_dataset], 
+            train_datasets=[train_dataset],
+            eval_datasets=[test_dataset],
             batch_size=batch_size,
         ),
     )
