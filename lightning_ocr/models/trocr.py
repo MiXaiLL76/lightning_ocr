@@ -1,42 +1,55 @@
 import torch
-import albumentations as A
-from albumentations.pytorch import ToTensorV2
 import lightning as L
-from lightning_ocr.models.backbones.resnet_abi import ResNetABI
-from lightning_ocr.models.encoders.abi_encoder import ABIEncoder
-from lightning_ocr.models.decoders.abi_vision_decoder import ABIVisionDecoder
-from lightning_ocr.models.module_losses.abi_module_loss import ABIModuleLoss
-from lightning_ocr.dictionary.dictionary import Dictionary
+from transformers import (
+    TrOCRProcessor,
+    VisionEncoderDecoderModel,
+    VisionEncoderDecoderConfig,
+)
+import albumentations as A
 from lightning_ocr.datasets.recog_text_dataset import (
     RecogTextDataset,
+    RecogTextDataModule,
     visualize_dataset,
 )
-from lightning_ocr.models.postprocessors.attn_postprocessor import (
-    AttentionPostprocessor,
-)
+from lightning_ocr.dictionary.dictionary import Dictionary
 from lightning_ocr.metrics.recog_metric import WordMetric, OneMinusNEDMetric, CharMetric
 from torch.utils.tensorboard import SummaryWriter
 
-
-class ABINetVision(L.LightningModule):
+# https://huggingface.co/docs/transformers/model_doc/trocr#transformers.TrOCRForCausalLM.forward.example
+class TrOCR(L.LightningModule):
     def __init__(self, config: dict = {}):
         super().__init__()
         self.dictionary = Dictionary(**config.get("dictionary", {}))
 
-        self.backbone = ResNetABI(**config.get("backbone", {}))
-        self.encoder = ABIEncoder(**config.get("encoder", {}))
-        self.decoder = ABIVisionDecoder(
-            num_classes=self.dictionary.num_classes, **config.get("decoder", {})
-        )
-        self.postprocessor = AttentionPostprocessor(
-            dictionary=self.dictionary,
-            max_seq_len=self.decoder.max_seq_len,
-            **config.get("postprocessor", {}),
-        )
-        self.loss_fn = ABIModuleLoss(
-            dictionary=self.dictionary,
-            max_seq_len=self.decoder.max_seq_len,
-            **config.get("loss_fn", {}),
+        pretrained_model = config.get("pretrained_model", 'microsoft/trocr-small-printed')
+        
+        self.processor = TrOCRProcessor.from_pretrained(pretrained_model)
+        self.processor.tokenizer = self.dictionary.fast_tokenizer()
+
+        self.cfg = VisionEncoderDecoderConfig.from_pretrained(pretrained_model)
+        
+        self.max_token_length = config.get("max_seq_len", self.cfg.decoder.max_length)
+        
+        # DECODER CFG
+        self.cfg.decoder.vocab_size = self.processor.tokenizer.vocab_size
+        self.cfg.decoder.pad_token_id = self.processor.tokenizer.pad_token_id
+        self.cfg.decoder.bos_token_id = self.processor.tokenizer.bos_token_id
+        self.cfg.decoder.eos_token_id = self.processor.tokenizer.eos_token_id
+        self.cfg.decoder.max_length = self.max_token_length
+        
+        # ENCODER CFG
+        self.cfg.encoder.max_length = self.max_token_length
+        
+        # MODEL CFG
+        self.cfg.decoder_start_token_id = self.processor.tokenizer.eos_token_id
+        self.cfg.eos_token_id = self.processor.tokenizer.eos_token_id
+        self.cfg.pad_token_id = self.processor.tokenizer.pad_token_id
+        self.cfg.vocab_size = self.processor.tokenizer.vocab_size
+        
+        self.model = VisionEncoderDecoderModel.from_pretrained(
+            pretrained_model, 
+            config=self.cfg,
+            ignore_mismatched_sizes=True
         )
 
         self.metrics = [
@@ -44,24 +57,21 @@ class ABINetVision(L.LightningModule):
             CharMetric(),
             OneMinusNEDMetric(),
         ]
-
-        assert (
-            self.dictionary.end_idx is not None
-        ), "Dictionary must contain an end token! (with_end=True)"
-
+        
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(
             self.parameters(),
-            lr=1e-4,
+            lr=2e-05,
         )
 
         scheduler1 = {
             "scheduler": torch.optim.lr_scheduler.LinearLR(
-                optimizer, start_factor=0.001, total_iters=2
+                optimizer, start_factor=0.9, total_iters=2
             ),
-            "interval": "step",
+            "interval": "epoch",
             "frequency": 1,
         }
+        
         scheduler2 = {
             "scheduler": torch.optim.lr_scheduler.MultiStepLR(
                 optimizer, milestones=[16, 18], last_epoch=self.trainer.max_epochs
@@ -72,48 +82,64 @@ class ABINetVision(L.LightningModule):
 
         return [optimizer], [scheduler1, scheduler2]
 
-    def forward(self, inputs: torch.Tensor):
-        feat = self.backbone(inputs)
-        out_enc = self.encoder(feat)
-        return dict(out_vis=self.decoder(out_enc))
-
-    def forward_test(self, inputs: torch.Tensor) -> torch.Tensor:
-        raw_result = self.forward(inputs)
-
-        if "out_fusers" in raw_result and len(raw_result["out_fusers"]) > 0:
-            ret = raw_result["out_fusers"][-1]["logits"]
-        elif "out_langs" in raw_result and len(raw_result["out_langs"]) > 0:
-            ret = raw_result["out_langs"][-1]["logits"]
-        else:
-            ret = raw_result["out_vis"]["logits"]
-        return torch.nn.functional.softmax(ret, dim=-1)
-
+    def tokenizer_encode(self, data_samples):
+        def tokenize(samples, tokenizer_class):
+            tokens = tokenizer_class(
+                samples, 
+                return_tensors="pt", 
+                pad_to_multiple_of=self.max_token_length,
+                padding=True,
+                max_length=self.max_token_length,
+                truncation=True,
+            )
+            labels = tokens['input_ids']
+            labels[tokens['attention_mask'] == 0] = tokenizer_class.eos_token_id
+            return labels
+        
+        samples = [item['gt_text'] for item in data_samples]
+        return tokenize(samples, self.processor.tokenizer)
+    
     def training_step(self, batch, batch_idx):
         inputs, data_samples = batch
-        out_enc = self.forward(inputs)
-        losses = self.loss_fn(out_enc, data_samples)
-        total_loss = torch.sum(torch.stack(list(losses.values())))
 
-        losses["total"] = total_loss
-
+        pixel_values = self.processor(inputs, return_tensors="pt").pixel_values.to(self.model.device)
+        labels = self.tokenizer_encode(data_samples).to(self.model.device)
+        outputs = self.model(pixel_values, labels=labels)
+        losses = {
+            "total" : outputs.loss,
+        }
+        
         self.log_dict(
             {f"loss/{key}": val for key, val in losses.items()},
             on_step=True,
             on_epoch=True,
+            prog_bar=True,
             batch_size=len(data_samples),
         )
 
-        return total_loss
+        lr = self.optimizers().param_groups[0]['lr']  # Get current learning rate
+        self.log('learning_rate', lr, on_step=True, prog_bar=True, logger=True)
+
+        return outputs.loss
 
     def validation_step(self, batch, batch_idx):
         inputs, data_samples = batch
-        out_enc = self.forward_test(inputs)
-        return out_enc
+
+        pixel_values = self.processor(inputs, return_tensors="pt").pixel_values.to(self.model.device)
+        generated_ids = self.model.generate(pixel_values, max_new_tokens=self.max_token_length)
+        return generated_ids
 
     def on_validation_batch_end(self, outputs, batch, batch_idx):
         inputs, data_samples = batch
-        data_samples = self.postprocessor(outputs, data_samples)
 
+        def batch_decode(input_ids):
+            return ["".join(self.processor.batch_decode(input_id, skip_special_tokens=True)) for input_id in input_ids]
+
+        generated_ids = batch_decode(outputs)
+
+        for idx, data_sample in enumerate(data_samples):
+            data_sample['pred_text'] = generated_ids[idx]
+        
         for metric in self.metrics:
             metric.process(None, data_samples)
             eval_res = metric.evaluate(size=len(data_samples))
@@ -133,11 +159,9 @@ class ABINetVision(L.LightningModule):
             )
             break
 
-
-# https://github.com/open-mmlab/mmocr/blob/main/configs/textrecog/abinet/_base_abinet-vision.py#L42
 def load_train_pipeline():
     train_pipeline = [
-        A.Resize(32, 128),
+        A.Resize(384, 384),
         A.Compose(
             [  # RandomApply
                 A.OneOf(
@@ -173,27 +197,13 @@ def load_train_pipeline():
             hue=(-0.1, 0.1),
             p=0.25,
         ),
-        A.Normalize(
-            mean=[123.675 / 255, 116.28 / 255, 103.53 / 255],
-            std=[58.395 / 255, 57.12 / 255, 57.375 / 255],
-            max_pixel_value=255.0,
-            p=1.0,
-        ),
-        ToTensorV2(),
     ]
     return train_pipeline
 
 
 def load_test_pipeline():
     test_pipeline = [
-        A.Resize(32, 128),
-        A.Normalize(
-            mean=[123.675 / 255, 116.28 / 255, 103.53 / 255],
-            std=[58.395 / 255, 57.12 / 255, 57.375 / 255],
-            max_pixel_value=255.0,
-            p=1.0,
-        ),
-        ToTensorV2(),
+        A.Resize(384, 384),
     ]
     return test_pipeline
 
@@ -201,11 +211,12 @@ def load_test_pipeline():
 if __name__ == "__main__":
     from lightning.pytorch.callbacks import ModelCheckpoint
     from lightning.pytorch.loggers import TensorBoardLogger
-    from torch.utils.data import DataLoader
+    import os
+    os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
     batch_size = 8
 
-    tb_logger = TensorBoardLogger(save_dir="logs/abinet/")
+    tb_logger = TensorBoardLogger(save_dir="logs/TrOCR")
 
     train_dataset = RecogTextDataset(
         data_root="/home/mixaill76/text_datasets/data_collection/005-CV",
@@ -218,7 +229,7 @@ if __name__ == "__main__":
         log_every_n_steps = 5
 
     checkpoint_callback = ModelCheckpoint(
-        dirpath="./checkpoints/abinet",
+        dirpath="./checkpoints/TrOCR",
         filename="model-{epoch:02d}-loss-{loss/total_epoch:.2f}",
         monitor="loss/total_epoch",
         save_weights_only=True,
@@ -232,34 +243,38 @@ if __name__ == "__main__":
         log_every_n_steps=log_every_n_steps,
         callbacks=[checkpoint_callback],
         max_epochs=20,
+        # accumulate_grad_batches=batch_size,
     )
     dictionary = dict(
         dict_list=list("0123456789."),
         with_start=True,
         with_end=True,
-        same_start_end=True,
-        with_padding=False,
-        with_unknown=False,
+        with_padding=True,
+        with_unknown=True,
     )
-    model = ABINetVision(dict(dictionary=dictionary, decoder={"max_seq_len": 12}))
-    train_dataset.data_list = model.loss_fn.get_targets(train_dataset.data_list)
 
-    dataset, test_dataset = torch.utils.data.random_split(train_dataset, [0.8, 0.2])
+    # https://huggingface.co/microsoft/trocr-small-printed/tree/main
+    small_cfg = {
+        "dictionary" : dictionary,
+        "pretrained_model" : "microsoft/trocr-small-printed",
+    }
+    model = TrOCR(small_cfg)
+    
+    from sklearn.model_selection import train_test_split
+    import copy
+    TRAIN, TEST = train_test_split(train_dataset.data_list, test_size=0.2, random_state=42)
+    
+    test_dataset = copy.deepcopy(train_dataset)
+    test_dataset.data_list = TEST
+    test_dataset.transform = A.Compose(load_test_pipeline())
+    train_dataset.data_list = TRAIN
 
+    
     trainer.fit(
         model,
-        train_dataloaders=DataLoader(
-            dataset,
+        datamodule=RecogTextDataModule(
+            train_datasets=[train_dataset], 
+            eval_datasets=[test_dataset], 
             batch_size=batch_size,
-            shuffle=True,
-            num_workers=batch_size,
-            collate_fn=train_dataset.collate_fn,
-        ),
-        val_dataloaders=DataLoader(
-            test_dataset,
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=batch_size,
-            collate_fn=train_dataset.collate_fn,
         ),
     )

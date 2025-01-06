@@ -1,5 +1,5 @@
 import os.path as osp
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Union
 import pandas as pd
 import torch
 import numpy as np
@@ -7,6 +7,8 @@ from PIL import Image
 import albumentations as A
 import cv2
 import matplotlib.pyplot as plt
+import lightning as L
+from torch.utils.data import DataLoader
 
 
 class RecogTextDataset(torch.utils.data.Dataset):
@@ -55,7 +57,7 @@ class RecogTextDataset(torch.utils.data.Dataset):
         self.gt_text_row = gt_text_row
         self.image_row = image_row
 
-        self.data_list = self.load_data_list()
+        self.data_list: List[dict] = self.load_data_list()
         self.transform = A.Compose(pipeline)
 
     def load_data_list(self) -> List[dict]:
@@ -98,9 +100,63 @@ class RecogTextDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.data_list)
 
-    def collate_fn(self, data_samples):
-        inputs = torch.stack([item["image"] for item in data_samples], dim=0)
+    @staticmethod
+    def collate_fn(data_samples):
+        inputs = [item["image"] for item in data_samples]
+
+        if len(inputs) > 0:
+            if isinstance(inputs[0], np.ndarray):
+                inputs = np.stack([item for item in inputs], axis=0)
+            else:
+                inputs = torch.stack([item for item in inputs], dim=0)
+
         return inputs, data_samples
+
+
+class RecogTextDataModule(L.LightningDataModule):
+    def __init__(
+        self,
+        train_datasets: Union[List[RecogTextDataset], RecogTextDataset],
+        eval_datasets: Union[List[RecogTextDataset], RecogTextDataset],
+        batch_size: Optional[int] = 8,
+        eval_batch_size: Optional[int] = None,
+    ):
+        super().__init__()
+
+        self.batch_size = batch_size
+        self.eval_batch_size = (
+            eval_batch_size if eval_batch_size is not None else batch_size
+        )
+
+        if isinstance(train_datasets, RecogTextDataset):
+            train_datasets = [train_datasets]
+
+        if isinstance(eval_datasets, RecogTextDataset):
+            eval_datasets = [eval_datasets]
+
+        self.train_datasets = torch.utils.data.ConcatDataset(train_datasets)
+        self.eval_datasets = torch.utils.data.ConcatDataset(eval_datasets)
+
+    def __len__(self):
+        return len(self.train_datasets) // self.batch_size
+
+    def train_dataloader(self):
+        return DataLoader(
+            self.train_datasets,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.batch_size,
+            collate_fn=RecogTextDataset.collate_fn,
+        )
+
+    def val_dataloader(self):
+        return DataLoader(
+            self.eval_datasets,
+            batch_size=self.eval_batch_size,
+            shuffle=False,
+            num_workers=self.eval_batch_size,
+            collate_fn=RecogTextDataset.collate_fn,
+        )
 
 
 def visualize_dataset(
