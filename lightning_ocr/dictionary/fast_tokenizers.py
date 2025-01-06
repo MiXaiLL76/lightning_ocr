@@ -21,7 +21,7 @@ class FastTokenizer(PreTrainedTokenizerFast):
                 unknown_token: 3,
             },
             "merges": [],
-            "unk_token" : unknown_token,
+            "unk_token": unknown_token,
         }
 
         for key in dict_list:
@@ -37,11 +37,11 @@ class FastTokenizer(PreTrainedTokenizerFast):
         tokenizer.enable_padding(
             pad_id=bpe_kwargs["vocab"][padding_token], pad_token=padding_token
         )
-        
+
         super().__init__(
             tokenizer_object=tokenizer,
             bos_token=start_token,
             eos_token=end_token,
             pad_token=padding_token,
-            unk_token=unknown_token
+            unk_token=unknown_token,
         )
