@@ -11,7 +11,7 @@ from lightning_ocr.datasets.recog_text_dataset import (
     RecogTextDataModule,
     visualize_dataset,
 )
-from lightning_ocr.dictionary.dictionary import Dictionary
+from lightning_ocr.dictionary.fast_tokenizers import FastTokenizer
 from lightning_ocr.metrics.recog_metric import WordMetric, OneMinusNEDMetric, CharMetric
 from torch.utils.tensorboard import SummaryWriter
 
@@ -20,14 +20,12 @@ from torch.utils.tensorboard import SummaryWriter
 class TrOCR(L.LightningModule):
     def __init__(self, config: dict = {}):
         super().__init__()
-        self.dictionary = Dictionary(**config.get("dictionary", {}))
-
         pretrained_model = config.get(
             "pretrained_model", "microsoft/trocr-small-printed"
         )
 
         self.processor = TrOCRProcessor.from_pretrained(pretrained_model)
-        self.processor.tokenizer = self.dictionary.fast_tokenizer()
+        self.processor.tokenizer = FastTokenizer(**config.get("tokenizer", {}))
 
         self.cfg = VisionEncoderDecoderConfig.from_pretrained(pretrained_model)
 
@@ -257,17 +255,12 @@ if __name__ == "__main__":
         max_epochs=20,
         # accumulate_grad_batches=batch_size,
     )
-    dictionary = dict(
-        dict_list=list("0123456789."),
-        with_start=True,
-        with_end=True,
-        with_padding=True,
-        with_unknown=True,
-    )
 
     # https://huggingface.co/microsoft/trocr-small-printed/tree/main
     small_cfg = {
-        "dictionary": dictionary,
+        "tokenizer": {
+            "dict_list": list("0123456789."),
+        },
         "pretrained_model": "microsoft/trocr-small-printed",
     }
     model = TrOCR(small_cfg)
