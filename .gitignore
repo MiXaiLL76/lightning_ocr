@@ -3,3 +3,4 @@ logs
 checkpoints
 test.ipynb
 test_2.ipynb
+*.pth

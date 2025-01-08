@@ -1,4 +1,6 @@
+import os
 import torch
+import json
 import lightning as L
 import albumentations as A
 from lightning_ocr.datasets.recog_text_dataset import (
@@ -6,27 +8,31 @@ from lightning_ocr.datasets.recog_text_dataset import (
     RecogTextDataModule,
     visualize_dataset,
 )
-from lightning_ocr.metrics.recog_metric import WordMetric, OneMinusNEDMetric, CharMetric
-from torch.utils.tensorboard import SummaryWriter
+import typing
 from transformers import MgpstrProcessor, MgpstrForSceneTextRecognition, MgpstrConfig
-from lightning_ocr.dictionary.tokenization_mgp_str import MgpstrTokenizer
+from lightning_ocr.tokenizer.tokenization_mgp_str import MgpstrTokenizer
+from lightning_ocr.models.base import BaseOcrModel
 
 
 # https://huggingface.co/docs/transformers/v4.33.2/en/model_doc/mgp-str
-class MGP_STR(L.LightningModule):
+class MGP_STR(BaseOcrModel):
     def __init__(self, config: dict = {}):
-        super().__init__()
+        super().__init__(
+            config=config,
+            base_pretrained_model="alibaba-damo/mgp-str-base",
+            image_height=32,
+            image_width=128,
+        )
 
-        char_tokenizer = MgpstrTokenizer(**config.get("tokenizer", {}))
+        self.processor = MgpstrProcessor.from_pretrained(self.pretrained_model)
 
-        pretrained_model = config.get("pretrained_model", "alibaba-damo/mgp-str-base")
+        if config.get("tokenizer") is not None:
+            self.processor.char_tokenizer = MgpstrTokenizer(**config.get("tokenizer", {}))
 
-        self.cfg = MgpstrConfig.from_pretrained(pretrained_model)
-        self.cfg.num_character_labels = len(char_tokenizer.vocab)
-        self.cfg.max_token_length = config.get("max_seq_len", self.cfg.max_token_length)
-
-        self.processor = MgpstrProcessor.from_pretrained(pretrained_model)
-        self.processor.char_tokenizer = char_tokenizer
+        self.cfg = MgpstrConfig.from_pretrained(self.pretrained_model)
+        self.cfg.num_character_labels = len(self.processor.char_tokenizer.vocab)
+        self.max_token_length = config.get("max_seq_len", self.max_token_length)
+        self.max_token_length = self.max_token_length
 
         # https://github.com/huggingface/transformers/blob/v4.33.2/src/transformers/models/mgp_str/processing_mgp_str.py#L143
         self.processor.bpe_tokenizer.pad_token_id = (
@@ -34,20 +40,58 @@ class MGP_STR(L.LightningModule):
         )
         self.processor.wp_tokenizer.eos_token_id = 102
 
-        self.model = MgpstrForSceneTextRecognition.from_pretrained(
-            pretrained_model, config=self.cfg, ignore_mismatched_sizes=True
-        )
+        if self.init_from_pretrained_model:
+            self.model = MgpstrForSceneTextRecognition.from_pretrained(
+                self.pretrained_model, config=self.cfg, ignore_mismatched_sizes=True
+            )
+        else:
+            self.model = MgpstrForSceneTextRecognition(self.cfg)
 
-        self.metrics = [
-            WordMetric(mode=["exact", "ignore_case", "ignore_case_symbol"]),
-            CharMetric(),
-            OneMinusNEDMetric(),
-        ]
+    def predict(self, images):
+        pixel_values = self.processor(
+            images=images, return_tensors="pt"
+        ).pixel_values.to(self.model.device)
+        outputs = self.model(pixel_values)
+        return self.processor.batch_decode(outputs.logits)["generated_text"]
+
+    def dump_config(self, output_folder):
+        os.makedirs(output_folder, exist_ok=True)
+
+        with open(f"{output_folder}/base_config.json", "w") as f:
+            json.dump(self.base_config, f, indent=4)
+
+        self.processor.save_pretrained(output_folder)
+        self.model.save_pretrained(output_folder, state_dict={})
+        os.remove(f"{output_folder}/model.safetensors")
+
+    @classmethod
+    def load_from_folder(cls, folder, model_file: typing.Optional[str] = "latest"):
+        with open(f"{folder}/base_config.json", "r") as f:
+            config = json.load(f)
+
+        config["pretrained_model"] = folder
+        config["init_from_pretrained_model"] = False
+
+        model = cls(config)
+
+        if model_file == "latest":
+            model_file = sorted(
+                [file for file in os.listdir(f"{folder}/") if ".ckpt" in file]
+            )[-1]
+
+        model.load_state_dict(
+            torch.load(
+                f"{folder}/{model_file}",
+                map_location=torch.device("cpu"),
+                weights_only=True,
+            )["state_dict"]
+        )
+        return model
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(
             self.parameters(),
-            lr=1e-4,
+            lr=self.base_config.get("lr", 1e-04),
         )
 
         scheduler = {
@@ -71,9 +115,9 @@ class MGP_STR(L.LightningModule):
             tokens = tokenizer_class(
                 samples,
                 return_tensors="pt",
-                pad_to_multiple_of=self.cfg.max_token_length,
+                pad_to_multiple_of=self.max_token_length,
                 padding=True,
-                max_length=self.cfg.max_token_length,
+                max_length=self.max_token_length,
                 truncation=True,
             )
             labels = tokens["input_ids"]
@@ -91,6 +135,9 @@ class MGP_STR(L.LightningModule):
             pred_logits.view(-1, pred_logits.size(-1)), target_labels.view(-1)
         )
 
+    def forward(self, inputs : torch.Tensor):
+        return self.model(inputs)
+    
     def training_step(self, batch, batch_idx):
         inputs, data_samples = batch
 
@@ -154,61 +201,10 @@ class MGP_STR(L.LightningModule):
 
         for data_sample in data_samples:
             fig = visualize_dataset(data_sample, return_fig=True)
-
-            tensorboard: SummaryWriter = self.logger.experiment
-            tensorboard.add_figure(
+            self.log_figure(
                 f"data_samples/{data_sample['index']}", fig, self.global_step
             )
             break
-
-
-def load_train_pipeline():
-    train_pipeline = [
-        A.Resize(32, 128),
-        A.Compose(
-            [  # RandomApply
-                A.OneOf(
-                    [  # RandomChoice
-                        A.Rotate(limit=(-15, 15), always_apply=True),
-                        A.Affine(
-                            scale=(0.2, 2.0),
-                            rotate=(-15, 15),
-                            translate_percent=(0.3, 0.3),
-                            shear=(-15, 15),
-                            always_apply=True,
-                        ),
-                        A.Perspective(
-                            scale=(0.05, 0.1), fit_output=True, always_apply=True
-                        ),
-                    ],
-                    1,
-                )
-            ],
-            p=0.5,
-        ),
-        A.Compose(
-            [  # RandomApply
-                A.GaussNoise(var_limit=(20, 20), p=0.5),
-                A.MotionBlur(blur_limit=7, p=0.5),
-            ],
-            p=0.25,
-        ),
-        A.ColorJitter(
-            brightness=(0.5, 1.5),
-            contrast=(0.5, 1.5),
-            saturation=(0.5, 1.5),
-            hue=(-0.1, 0.1),
-            p=0.25,
-        ),
-    ]
-    return train_pipeline
-
-
-def load_test_pipeline():
-    test_pipeline = [
-        A.Resize(32, 128),
-    ]
-    return test_pipeline
 
 
 if __name__ == "__main__":
@@ -220,12 +216,20 @@ if __name__ == "__main__":
 
     batch_size = 8
 
+    cfg = {
+        "tokenizer": {
+            "dict_list": list("0123456789."),
+        },
+    }
+
+    model = MGP_STR(cfg)
+
     tb_logger = TensorBoardLogger(save_dir="logs/MGP_STR")
 
     train_dataset = RecogTextDataset(
         data_root="/home/mixaill76/text_datasets/data_collection/005-CV",
         ann_file="ann_file.json",
-        pipeline=load_train_pipeline(),
+        pipeline=model.load_train_pipeline(),
     )
 
     log_every_n_steps = 50
@@ -249,14 +253,6 @@ if __name__ == "__main__":
         max_epochs=20,
     )
 
-    cfg = {
-        "tokenizer": {
-            "dict_list": list("0123456789."),
-        },
-    }
-
-    model = MGP_STR(cfg)
-
     from sklearn.model_selection import train_test_split
     import copy
 
@@ -266,8 +262,9 @@ if __name__ == "__main__":
 
     test_dataset = copy.deepcopy(train_dataset)
     test_dataset.data_list = TEST
-    test_dataset.transform = A.Compose(load_test_pipeline())
+    test_dataset.transform = A.Compose(model.load_test_pipeline())
     train_dataset.data_list = TRAIN
+    model.dump_config(checkpoint_callback.dirpath)
 
     trainer.fit(
         model,

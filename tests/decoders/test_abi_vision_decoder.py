@@ -13,10 +13,9 @@ class TestABIVisionDecoder(TestCase):
         )
 
         out_enc = torch.randn(2, 32, 8, 32)
-        result = decoder(out_enc)
-        self.assertIn("feature", result)
-        self.assertIn("logits", result)
-        self.assertIn("attn_scores", result)
-        self.assertEqual(result["feature"].shape, torch.Size([2, 10, 32]))
-        self.assertEqual(result["logits"].shape, torch.Size([2, 10, len(chars)]))
-        self.assertEqual(result["attn_scores"].shape, torch.Size([2, 10, 8, 32]))
+
+        feature, logits, attn_scores = decoder(out_enc)
+
+        self.assertEqual(feature.shape, torch.Size([2, 10, 32]))
+        self.assertEqual(logits.shape, torch.Size([2, 10, len(chars)]))
+        self.assertEqual(attn_scores.shape, torch.Size([2, 10, 8, 32]))

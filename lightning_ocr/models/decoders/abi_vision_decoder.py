@@ -11,7 +11,7 @@ class ABIVisionDecoder(nn.Module):
         `ABINet <https://arxiv.org/abs/2103.06495>`_.
 
     Args:
-        num_classes (int): Number of chars in Dictionary.
+        num_classes (int): Number of chars in tokenizer.
         in_channels (int): Number of channels :math:`E` of input vector.
             Defaults to 512.
         num_channels (int): Number of channels of hidden vectors in mini U-Net.
@@ -98,12 +98,8 @@ class ABIVisionDecoder(nn.Module):
         attn_vecs = torch.bmm(attn_scores, v)  # (N, T, E)
 
         out_enc = self.cls(attn_vecs)
-        result = {
-            "feature": attn_vecs,
-            "logits": out_enc,
-            "attn_scores": attn_scores.view(N, -1, H, W),
-        }
-        return result
+
+        return (attn_vecs, out_enc, attn_scores.view(N, -1, H, W))
 
     def _encoder_layer(
         self,
