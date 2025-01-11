@@ -6,7 +6,7 @@ import torch.nn as nn
 class PositionalEncoding(nn.Module):
     """Fixed positional encoding with sine and cosine functions."""
 
-    def __init__(self, d_hid=512, n_position=200, dropout=0):
+    def __init__(self, d_hid=512, n_position=200, dropout=0.0):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
 
@@ -35,5 +35,5 @@ class PositionalEncoding(nn.Module):
             x (Tensor): Tensor of shape (batch_size, pos_len, d_hid, ...)
         """
         self.device = x.device
-        x = x + self.position_table[:, : x.size(1)].clone().detach()
+        x = x + self.position_table[:, : x.size(1)]
         return self.dropout(x)

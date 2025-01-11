@@ -1,6 +1,6 @@
 import torch
 import unittest
-from lightning_ocr.models.encoders.abi_encoder import ABIEncoder
+from lightning_ocr.modules.encoders.abi_encoder import ABIEncoder
 
 
 class TestABIEncoder(unittest.TestCase):

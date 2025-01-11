@@ -2,7 +2,7 @@ from unittest import TestCase
 
 import torch
 
-from lightning_ocr.models.decoders.abi_vision_decoder import ABIVisionDecoder
+from lightning_ocr.modules.decoders.abi_vision_decoder import ABIVisionDecoder
 
 
 class TestABIVisionDecoder(TestCase):

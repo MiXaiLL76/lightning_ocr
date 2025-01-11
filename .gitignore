@@ -4,3 +4,6 @@ checkpoints
 test.ipynb
 test_2.ipynb
 *.pth
+*.onnx
+.ruff_cache
+examples/datasets

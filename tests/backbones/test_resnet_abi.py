@@ -1,7 +1,7 @@
 from unittest import TestCase
 import torch
 
-from lightning_ocr.models.backbones.resnet_abi import ResNetABI
+from lightning_ocr.modules.backbones.resnet_abi import ResNetABI
 
 
 class TestResNetABI(TestCase):

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from lightning_ocr.models.modules.transformer_module import PositionalEncoding
+from lightning_ocr.modules.transformer.transformer_module import PositionalEncoding
 
 
 class ABIEncoder(nn.Module):
@@ -39,11 +39,12 @@ class ABIEncoder(nn.Module):
             dim_feedforward=d_inner,
             activation=F.relu,
             dropout=dropout,
-            batch_first=True,
+            batch_first=False,
         )
         self.transformer = nn.TransformerEncoder(
             encoder_layer=self.encoder_layer,
             num_layers=n_layers,
+            enable_nested_tensor=False,
         )
 
     def forward(self, feature: torch.Tensor) -> torch.Tensor:

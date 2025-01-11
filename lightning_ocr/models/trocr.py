@@ -9,12 +9,8 @@ from transformers import (
 )
 import typing
 import albumentations as A
-from lightning_ocr.datasets.recog_text_dataset import (
-    RecogTextDataset,
-    RecogTextDataModule,
-    visualize_dataset,
-)
-from lightning_ocr.tokenizer.fast_tokenizers import FastTokenizer
+from lightning_ocr.datasets import RecogTextDataset, RecogTextDataModule
+from lightning_ocr.tokenizer import FastTokenizer
 from lightning_ocr.models.base import BaseOcrModel
 
 
@@ -178,11 +174,37 @@ class TrOCR(BaseOcrModel):
             )
 
         for data_sample in data_samples:
-            fig = visualize_dataset(data_sample, return_fig=True)
+            fig = RecogTextDataset.visualize_dataset(data_sample, return_fig=True)
             self.log_figure(
                 f"data_samples/{data_sample['index']}", fig, self.global_step
             )
             break
+
+    def forward(self, inputs: torch.Tensor):
+        generated_ids = self.model.generate(
+            inputs, max_new_tokens=self.max_token_length
+        )
+        return generated_ids
+
+    def to_onnx(self, file_path: str, **kwargs: typing.Any) -> None:
+        input_sample = torch.randn(
+            2, 3, self.image_size["height"], self.image_size["width"]
+        )
+
+        torch.onnx.export(
+            self,
+            input_sample,
+            file_path,
+            input_names=["input"],
+            output_names=["output", "out_enc", "attn_scores"],
+            dynamic_axes={
+                "input": {0: "batch_size"},
+                "output": {0: "batch_size"},
+                "out_enc": {0: "batch_size"},
+                "attn_scores": {0: "batch_size"},
+            },
+            **kwargs,
+        )
 
 
 if __name__ == "__main__":

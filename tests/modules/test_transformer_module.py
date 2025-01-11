@@ -1,6 +1,6 @@
 from unittest import TestCase
 import torch
-from lightning_ocr.models.modules.transformer_module import PositionalEncoding
+from lightning_ocr.modules.transformer.transformer_module import PositionalEncoding
 
 
 class TestPositionalEncoding(TestCase):

@@ -6,6 +6,7 @@ from transformers import PreTrainedTokenizerFast
 
 space_key = "<SPACE>"
 
+
 class FastTokenizer(PreTrainedTokenizerFast):
     def __init__(
         self,
@@ -33,7 +34,7 @@ class FastTokenizer(PreTrainedTokenizerFast):
 
             if key == " ":
                 key = space_key
-            
+
             bpe_kwargs["vocab"][key] = len(bpe_kwargs["vocab"])
 
         tokenizer = Tokenizer(models.BPE(**bpe_kwargs))
@@ -60,9 +61,13 @@ class FastTokenizer(PreTrainedTokenizerFast):
         **kwargs,
     ) -> str:
         decoded_str = super().decode(
-            token_ids, 
-            skip_special_tokens=skip_special_tokens, 
-            clean_up_tokenization_spaces=clean_up_tokenization_spaces, 
-            **kwargs
+            token_ids,
+            skip_special_tokens=skip_special_tokens,
+            clean_up_tokenization_spaces=clean_up_tokenization_spaces,
+            **kwargs,
         )
         return decoded_str.replace(" ", "").replace(space_key, " ")
+
+    @property
+    def __class__(self):
+        return PreTrainedTokenizerFast

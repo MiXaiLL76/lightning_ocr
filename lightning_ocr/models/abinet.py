@@ -6,16 +6,12 @@ import numpy as np
 import typing
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
-from lightning_ocr.models.backbones.resnet_abi import ResNetABI
-from lightning_ocr.models.encoders.abi_encoder import ABIEncoder
-from lightning_ocr.models.decoders.abi_vision_decoder import ABIVisionDecoder
-from lightning_ocr.datasets.recog_text_dataset import (
-    RecogTextDataset,
-    RecogTextDataModule,
-    visualize_dataset,
-)
+from lightning_ocr.modules.backbones import ResNetABI
+from lightning_ocr.modules.encoders import ABIEncoder
+from lightning_ocr.modules.decoders import ABIVisionDecoder
+from lightning_ocr.datasets import RecogTextDataset, RecogTextDataModule
 from lightning_ocr.models.base import BaseOcrModel
-from lightning_ocr.tokenizer.fast_tokenizers import FastTokenizer
+from lightning_ocr.tokenizer import FastTokenizer
 from lightning_ocr.mmocr_compatible.abinet import load_mmocr_state_dict
 
 
@@ -75,8 +71,13 @@ class ABINetVision(BaseOcrModel):
         tokens, _ = self.logits_postprocessor(outputs[0])
         return self.tokenizer.batch_decode(tokens, skip_special_tokens=True)
 
-    def forward(self, inputs: torch.Tensor):
-        return self.decoder(self.encoder(self.backbone(inputs)))
+    def forward(self, inputs: torch.Tensor, softmax: bool = True):
+        attn_vecs, out_enc, attn_scores = self.decoder(
+            self.encoder(self.backbone(inputs))
+        )
+        if softmax:
+            attn_vecs = torch.nn.functional.softmax(attn_vecs, dim=-1)
+        return attn_vecs, out_enc, attn_scores
 
     def tokenizer_encode(self, data_samples):
         def tokenize(samples, tokenizer_class):
@@ -106,7 +107,7 @@ class ABINetVision(BaseOcrModel):
 
     def training_step(self, batch, batch_idx):
         inputs, data_samples = batch
-        outputs = self.forward(inputs.to(self.device))
+        outputs = self.forward(inputs.to(self.device), softmax=False)
         labels = self.tokenizer_encode(data_samples).to(self.device)
         total_loss = self.calc_loss(outputs[0], labels)
 
@@ -127,8 +128,8 @@ class ABINetVision(BaseOcrModel):
 
         return total_loss
 
-    def logits_postprocessor(self, logits):
-        preds_max_prob = torch.nn.functional.softmax(logits, dim=-1)
+    def logits_postprocessor(self, preds_max_prob):
+        # preds_max_prob = torch.nn.functional.softmax(logits, dim=-1)
         out_tokens, conf_scores = [], []
 
         scores, tokens = preds_max_prob.max(dim=-1)
@@ -171,7 +172,7 @@ class ABINetVision(BaseOcrModel):
             )
 
         for data_sample in data_samples:
-            fig = visualize_dataset(data_sample, return_fig=True)
+            fig = RecogTextDataset.visualize_dataset(data_sample, return_fig=True)
             self.log_figure(
                 f"data_samples/{data_sample['index']}", fig, self.global_step
             )
@@ -229,6 +230,26 @@ class ABINetVision(BaseOcrModel):
         )
         return model
 
+    def to_onnx(self, file_path: str, **kwargs: typing.Any) -> None:
+        input_sample = torch.randn(
+            2, 3, self.image_size["height"], self.image_size["width"]
+        )
+
+        torch.onnx.export(
+            self,
+            input_sample,
+            file_path,
+            input_names=["input"],
+            output_names=["output", "out_enc", "attn_scores"],
+            dynamic_axes={
+                "input": {0: "batch_size"},
+                "output": {0: "batch_size"},
+                "out_enc": {0: "batch_size"},
+                "attn_scores": {0: "batch_size"},
+            },
+            **kwargs,
+        )
+
 
 if __name__ == "__main__":
     import os
@@ -269,7 +290,7 @@ if __name__ == "__main__":
     )
 
     trainer = L.Trainer(
-        precision="16",
+        precision="16-mixed",
         logger=tb_logger,
         log_every_n_steps=log_every_n_steps,
         callbacks=[checkpoint_callback],
