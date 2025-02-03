@@ -1,0 +1,45 @@
+[tool.poetry]
+name = "lightning_ocr"
+version = "0.1.0"
+readme = "README.md"
+authors = ["MiXaiLL76 <mike.milos@yandex.ru>"]
+description = "lightningOCR is an open-source toolbox based on PyTorch and Lightning-AI for text recognition."
+keywords = ["lightning", "ocr", "mmocr"]
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+packages = [{ include = "lightning_ocr" }]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+lightning = { version = "*" }
+torch = { version = "*" }
+torchvision = { version = "*" }
+numpy = { version = "*" }
+matplotlib = { version = "*" }
+opencv-python = { version = "*" }
+datasets = { version = "*" }
+transformers = { version = "*" }
+tokenizers = { version = "*" }
+albumentations = { version = "*" }
+pillow = { version = "*" }
+rapidfuzz = { version = "*" }
+onnxruntime = { version = "*" }
+onnx = { version = "*" }
+tensorboard = { version = "*" }
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.urls]
+Homepage = "https://github.com/MiXaiLL76/lightning_ocr"

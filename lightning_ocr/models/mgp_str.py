@@ -2,8 +2,7 @@ import os
 import torch
 import json
 import lightning as L
-import albumentations as A
-from lightning_ocr.datasets import RecogTextDataset, RecogTextDataModule
+from lightning_ocr.datasets import HuggingFaceOCRDataset, RecogTextDataModule
 import typing
 from transformers import MgpstrProcessor, MgpstrForSceneTextRecognition, MgpstrConfig
 from lightning_ocr.tokenizer import MgpstrTokenizer
@@ -29,8 +28,7 @@ class MGP_STR(BaseOcrModel):
 
         self.cfg = MgpstrConfig.from_pretrained(self.pretrained_model)
         self.cfg.num_character_labels = len(self.processor.char_tokenizer.vocab)
-        self.max_token_length = config.get("max_seq_len", self.max_token_length)
-        self.max_token_length = self.max_token_length
+        self.cfg.max_token_length = self.max_token_length
 
         # https://github.com/huggingface/transformers/blob/v4.33.2/src/transformers/models/mgp_str/processing_mgp_str.py#L143
         self.processor.bpe_tokenizer.pad_token_id = (
@@ -60,7 +58,16 @@ class MGP_STR(BaseOcrModel):
 
         self.processor.save_pretrained(output_folder)
         self.model.save_pretrained(output_folder, state_dict={})
-        os.remove(f"{output_folder}/model.safetensors")
+
+        self.processor.bpe_tokenizer.save_pretrained(f"{output_folder}/bpe")
+        self.processor.char_tokenizer.save_pretrained(f"{output_folder}/char")
+
+        self.processor.wp_tokenizer.save_pretrained(f"{output_folder}/wp")
+        with open(f"{output_folder}/wp/vocab.json", "w") as fd:
+            json.dump(self.processor.wp_tokenizer.vocab, fd)
+
+        if os.path.exists(f"{output_folder}/model.safetensors"):
+            os.remove(f"{output_folder}/model.safetensors")
 
     @classmethod
     def load_from_folder(cls, folder, model_file: typing.Optional[str] = "latest"):
@@ -175,32 +182,13 @@ class MGP_STR(BaseOcrModel):
             images=inputs, return_tensors="pt"
         ).pixel_values.to(self.model.device)
         outputs = self.model(pixel_values)
-        return outputs
-
-    def on_validation_batch_end(self, outputs, batch, batch_idx):
-        inputs, data_samples = batch
 
         generated_text = self.processor.batch_decode(outputs.logits)["generated_text"]
 
         for idx, data_sample in enumerate(data_samples):
             data_sample["pred_text"] = generated_text[idx]
 
-        for metric in self.metrics:
-            metric.process(None, data_samples)
-            eval_res = metric.evaluate(size=len(data_samples))
-            self.log_dict(
-                eval_res,
-                on_epoch=True,
-                prog_bar=True,
-                batch_size=len(data_samples),
-            )
-
-        for data_sample in data_samples:
-            fig = RecogTextDataset.visualize_dataset(data_sample, return_fig=True)
-            self.log_figure(
-                f"data_samples/{data_sample['index']}", fig, self.global_step
-            )
-            break
+        return data_samples
 
     def forward(self, inputs: torch.Tensor):
         outputs = self.model(inputs)
@@ -234,25 +222,82 @@ if __name__ == "__main__":
 
     batch_size = 8
 
-    cfg = {
+    config = {
         "tokenizer": {
-            "dict_list": list("0123456789."),
+            "dict_list": list("0123456789.-;:"),
         },
     }
 
-    model = MGP_STR(cfg)
+    model = MGP_STR(config)
 
     tb_logger = TensorBoardLogger(save_dir="logs/MGP_STR")
 
-    train_dataset = RecogTextDataset(
-        data_root="/home/mixaill76/text_datasets/data_collection/005-CV",
-        ann_file="ann_file.json",
-        pipeline=model.load_train_pipeline(),
-    )
+    train_datasets = [
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/7SEG_OCR", split="train", pipeline=model.load_train_pipeline()
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/SVHN_OCR", split="train", pipeline=model.load_train_pipeline()
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/CTW1500_OCR",
+            split="train_numbers",
+            pipeline=model.load_train_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/ICDAR2013_OCR",
+            split="train_numbers",
+            pipeline=model.load_train_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/ICDAR2015_OCR",
+            split="train_numbers",
+            pipeline=model.load_train_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/TextOCR_OCR",
+            split="train_numbers",
+            pipeline=model.load_train_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/CTW1500_OCR",
+            split="train_numbers",
+            pipeline=model.load_train_pipeline(),
+        ),
+    ]
 
-    log_every_n_steps = 50
-    if len(train_dataset) // batch_size < 50:
-        log_every_n_steps = 5
+    eval_datasets = [
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/SVHN_OCR", split="test", pipeline=model.load_test_pipeline()
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/CTW1500_OCR",
+            split="test_numbers",
+            pipeline=model.load_test_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/ICDAR2013_OCR",
+            split="test_numbers",
+            pipeline=model.load_test_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/ICDAR2015_OCR",
+            split="test_numbers",
+            pipeline=model.load_test_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/TextOCR_OCR",
+            split="test_numbers",
+            pipeline=model.load_test_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/CTW1500_OCR",
+            split="test_numbers",
+            pipeline=model.load_test_pipeline(),
+        ),
+    ]
+
+    log_every_n_steps = 100
 
     checkpoint_callback = ModelCheckpoint(
         dirpath="./checkpoints/MGP_STR",
@@ -264,31 +309,20 @@ if __name__ == "__main__":
     )
 
     trainer = L.Trainer(
-        precision="16",
+        precision="16-mixed",
         logger=tb_logger,
         log_every_n_steps=log_every_n_steps,
         callbacks=[checkpoint_callback],
         max_epochs=20,
     )
 
-    from sklearn.model_selection import train_test_split
-    import copy
-
-    TRAIN, TEST = train_test_split(
-        train_dataset.data_list, test_size=0.2, random_state=42
-    )
-
-    test_dataset = copy.deepcopy(train_dataset)
-    test_dataset.data_list = TEST
-    test_dataset.transform = A.Compose(model.load_test_pipeline())
-    train_dataset.data_list = TRAIN
     model.dump_config(checkpoint_callback.dirpath)
 
     trainer.fit(
         model,
         datamodule=RecogTextDataModule(
-            train_datasets=[train_dataset],
-            eval_datasets=[test_dataset],
+            train_datasets=train_datasets,
+            eval_datasets=eval_datasets,
             batch_size=batch_size,
         ),
     )

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from lightning_ocr.modules.transformer.transformer_module import PositionalEncoding
+from lightning_ocr.modules.layers.transformer_module import PositionalEncoding
 
 
 class ABIEncoder(nn.Module):

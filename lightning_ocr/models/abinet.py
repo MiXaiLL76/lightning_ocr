@@ -2,17 +2,28 @@ import torch
 import json
 import os
 import lightning as L
-import numpy as np
 import typing
-import albumentations as A
-from albumentations.pytorch import ToTensorV2
 from lightning_ocr.modules.backbones import ResNetABI
 from lightning_ocr.modules.encoders import ABIEncoder
 from lightning_ocr.modules.decoders import ABIVisionDecoder
-from lightning_ocr.datasets import RecogTextDataset, RecogTextDataModule
+from lightning_ocr.datasets import HuggingFaceOCRDataset, RecogTextDataModule
 from lightning_ocr.models.base import BaseOcrModel
 from lightning_ocr.tokenizer import FastTokenizer
 from lightning_ocr.mmocr_compatible.abinet import load_mmocr_state_dict
+from transformers import ViTImageProcessor
+
+
+BASE_PROCESSOR_CFG = {
+    "do_convert_rgb": None,
+    "do_normalize": False,
+    "do_rescale": True,
+    "do_resize": True,
+    "image_mean": [0.5, 0.5, 0.5],
+    "image_std": [0.5, 0.5, 0.5],
+    "resample": 3,
+    "rescale_factor": 0.00392156862745098,
+    "size": {"height": 32, "width": 128},
+}
 
 
 class ABINetVision(BaseOcrModel):
@@ -43,6 +54,33 @@ class ABINetVision(BaseOcrModel):
             max_seq_len=self.max_token_length,
             **config.get("decoder", {}),
         )
+        vit_processor_cfg = dict(
+            BASE_PROCESSOR_CFG,
+            **{"size": self.image_size},
+        )
+        self.processor = ViTImageProcessor(
+            **dict(vit_processor_cfg, **config.get("processor", {}))
+        )
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(
+            self.parameters(),
+            lr=self.base_config.get("lr", 1e-04),
+        )
+
+        scheduler = {
+            "scheduler": torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=self.trainer.max_epochs
+                * len(self.trainer.fit_loop._data_source.instance),
+                eta_min=1e-7,
+            ),
+            "interval": "step",
+            "frequency": 1,
+            "name": "CosineAnnealingLR",
+        }
+
+        return [optimizer], [scheduler]
 
     def load_mmocr_model(self, model_path):
         if "http" in model_path:
@@ -62,11 +100,7 @@ class ABINetVision(BaseOcrModel):
         if not isinstance(images, list):
             images = [images]
 
-        pipe = A.Compose(self.load_test_pipeline())
-        inputs = torch.stack(
-            [pipe(image=image)["image"] for image in np.stack(images)], axis=0
-        )
-
+        inputs = self.processor.preprocess(images, return_tensors="pt")["pixel_values"]
         outputs = self.forward(inputs.to(self.device))
         tokens, _ = self.logits_postprocessor(outputs[0])
         return self.tokenizer.batch_decode(tokens, skip_special_tokens=True)
@@ -107,6 +141,7 @@ class ABINetVision(BaseOcrModel):
 
     def training_step(self, batch, batch_idx):
         inputs, data_samples = batch
+        inputs = self.processor.preprocess(inputs, return_tensors="pt")["pixel_values"]
         outputs = self.forward(inputs.to(self.device), softmax=False)
         labels = self.tokenizer_encode(data_samples).to(self.device)
         total_loss = self.calc_loss(outputs[0], labels)
@@ -149,62 +184,30 @@ class ABINetVision(BaseOcrModel):
 
     def validation_step(self, batch, batch_idx):
         inputs, data_samples = batch
-        return self.forward(inputs.to(self.device))
+        inputs = self.processor.preprocess(inputs, return_tensors="pt")["pixel_values"]
+        outputs = self.forward(inputs.to(self.device))
 
-    def on_validation_batch_end(self, outputs, batch, batch_idx):
-        inputs, data_samples = batch
         tokens, scores = self.logits_postprocessor(outputs[0])
 
-        for idx, data_sample in enumerate(data_samples):
-            data_samples[idx]["pred_text"] = self.tokenizer.decode(
-                tokens[idx], skip_special_tokens=True
+        for i in range(len(data_samples)):
+            data_samples[i]["pred_text"] = self.tokenizer.decode(
+                tokens[i], skip_special_tokens=True
             )
-            data_samples[idx]["pred_score"] = scores
+            data_samples[i]["pred_score"] = scores
 
-        for metric in self.metrics:
-            metric.process(None, data_samples)
-            eval_res = metric.evaluate(size=len(data_samples))
-            self.log_dict(
-                eval_res,
-                on_epoch=True,
-                prog_bar=True,
-                batch_size=len(data_samples),
-            )
-
-        for data_sample in data_samples:
-            fig = RecogTextDataset.visualize_dataset(data_sample, return_fig=True)
-            self.log_figure(
-                f"data_samples/{data_sample['index']}", fig, self.global_step
-            )
-            break
-
-    def load_train_pipeline(self):
-        return super().load_train_pipeline() + [
-            A.Normalize(
-                mean=[123.675 / 255, 116.28 / 255, 103.53 / 255],
-                std=[58.395 / 255, 57.12 / 255, 57.375 / 255],
-                max_pixel_value=255.0,
-                p=1.0,
-            ),
-            ToTensorV2(),
-        ]
-
-    def load_test_pipeline(self):
-        return super().load_test_pipeline() + [
-            A.Normalize(
-                mean=[123.675 / 255, 116.28 / 255, 103.53 / 255],
-                std=[58.395 / 255, 57.12 / 255, 57.375 / 255],
-                max_pixel_value=255.0,
-                p=1.0,
-            ),
-            ToTensorV2(),
-        ]
+        return data_samples
 
     def dump_config(self, output_folder):
         os.makedirs(output_folder, exist_ok=True)
 
         with open(f"{output_folder}/base_config.json", "w") as f:
             json.dump(self.base_config, f, indent=4)
+
+        self.processor.save_pretrained(output_folder)
+        self.tokenizer.save_pretrained(output_folder)
+
+        with open(f"{output_folder}/vocab.json", "w") as fd:
+            json.dump(self.tokenizer.vocab, fd)
 
     @classmethod
     def load_from_folder(cls, folder, model_file: typing.Optional[str] = "latest"):
@@ -258,27 +261,83 @@ if __name__ == "__main__":
 
     os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
-    batch_size = 8
+    batch_size = 32
 
     config = {
         "max_seq_len": 12,
         "tokenizer": {
-            "dict_list": list("0123456789."),
+            "dict_list": list("0123456789.-;:"),
         },
     }
     model = ABINetVision(config)
-
     tb_logger = TensorBoardLogger(save_dir="logs/abinet/")
 
-    train_dataset = RecogTextDataset(
-        data_root="/home/mixaill76/text_datasets/data_collection/005-CV",
-        ann_file="ann_file.json",
-        pipeline=model.load_train_pipeline(),
-    )
+    train_datasets = [
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/7SEG_OCR", split="train", pipeline=model.load_train_pipeline()
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/SVHN_OCR", split="train", pipeline=model.load_train_pipeline()
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/CTW1500_OCR",
+            split="train_numbers",
+            pipeline=model.load_train_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/ICDAR2013_OCR",
+            split="train_numbers",
+            pipeline=model.load_train_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/ICDAR2015_OCR",
+            split="train_numbers",
+            pipeline=model.load_train_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/TextOCR_OCR",
+            split="train_numbers",
+            pipeline=model.load_train_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/CTW1500_OCR",
+            split="train_numbers",
+            pipeline=model.load_train_pipeline(),
+        ),
+    ]
 
-    log_every_n_steps = 50
-    if len(train_dataset) // batch_size < 50:
-        log_every_n_steps = 5
+    eval_datasets = [
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/SVHN_OCR", split="test", pipeline=model.load_test_pipeline()
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/CTW1500_OCR",
+            split="test_numbers",
+            pipeline=model.load_test_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/ICDAR2013_OCR",
+            split="test_numbers",
+            pipeline=model.load_test_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/ICDAR2015_OCR",
+            split="test_numbers",
+            pipeline=model.load_test_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/TextOCR_OCR",
+            split="test_numbers",
+            pipeline=model.load_test_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/CTW1500_OCR",
+            split="test_numbers",
+            pipeline=model.load_test_pipeline(),
+        ),
+    ]
+
+    log_every_n_steps = 100
 
     checkpoint_callback = ModelCheckpoint(
         dirpath="./checkpoints/abinet",
@@ -294,27 +353,16 @@ if __name__ == "__main__":
         logger=tb_logger,
         log_every_n_steps=log_every_n_steps,
         callbacks=[checkpoint_callback],
-        max_epochs=20,
+        max_epochs=50,
     )
 
-    from sklearn.model_selection import train_test_split
-    import copy
-
-    TRAIN, TEST = train_test_split(
-        train_dataset.data_list, test_size=0.2, random_state=42
-    )
-
-    test_dataset = copy.deepcopy(train_dataset)
-    test_dataset.data_list = TEST
-    test_dataset.transform = A.Compose(model.load_test_pipeline())
-    train_dataset.data_list = TRAIN
     model.dump_config(checkpoint_callback.dirpath)
 
     trainer.fit(
         model,
         datamodule=RecogTextDataModule(
-            train_datasets=[train_dataset],
-            eval_datasets=[test_dataset],
+            train_datasets=train_datasets,
+            eval_datasets=eval_datasets,
             batch_size=batch_size,
         ),
     )

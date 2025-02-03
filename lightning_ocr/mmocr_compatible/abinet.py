@@ -1,7 +1,21 @@
+import sys
 import torch
+from importlib import import_module
+
+
+class HistoryBuffer:
+    def __init__(self, *args, **kwargs):
+        pass
 
 
 def load_mmocr_state_dict(path):
+    current_module = import_module(__name__)
+    if sys.modules.get("mmengine") is None:
+        sys.modules["mmengine"] = current_module
+        sys.modules["mmengine.logging"] = current_module
+        sys.modules["mmengine.logging.history_buffer"] = current_module
+
+    # torch.serialization.add_safe_globals([HistoryBuffer])
     state_dict = torch.load(path, map_location=torch.device("cpu"), weights_only=False)[
         "state_dict"
     ]

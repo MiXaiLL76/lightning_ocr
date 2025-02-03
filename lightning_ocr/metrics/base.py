@@ -68,21 +68,7 @@ class BaseMetric(metaclass=ABCMeta):
             and the values are corresponding results.
         """
 
-    def evaluate(self, size: int) -> dict:
-        """Evaluate the model performance of the whole dataset after processing
-        all batches.
-
-        Args:
-            size (int): Length of the entire validation dataset. When batch
-                size > 1, the dataloader may pad some data samples to make
-                sure all ranks have the same length of dataset slice. The
-                ``collect_results`` function will drop the padded data based on
-                this size.
-
-        Returns:
-            dict: Evaluation metrics dict on the val dataset. The keys are the
-            names of the metrics, and the values are corresponding results.
-        """
+    def evaluate(self, size: int, prefix: str = None) -> dict:
         if len(self.results) == 0:
             warnings.warn(
                 f"{self.__class__.__name__} got empty `self.results`. Please "
@@ -93,9 +79,13 @@ class BaseMetric(metaclass=ABCMeta):
         # cast all tensors in results list to cpu
         results = _to_cpu(self.results)
         _metrics = self.compute_metrics(results)  # type: ignore
+
         # Add prefix to metric names
-        if self.prefix:
+        if prefix is not None:
+            _metrics = {"/".join((prefix, k)): v for k, v in _metrics.items()}
+        elif self.prefix:
             _metrics = {"/".join((self.prefix, k)): v for k, v in _metrics.items()}
+
         metrics = [_metrics]
 
         # reset the results list

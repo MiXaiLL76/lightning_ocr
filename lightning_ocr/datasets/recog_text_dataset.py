@@ -5,8 +5,6 @@ import torch
 import numpy as np
 from PIL import Image
 import albumentations as A
-import cv2
-import matplotlib.pyplot as plt
 
 
 class RecogTextDataset(torch.utils.data.Dataset):
@@ -97,50 +95,3 @@ class RecogTextDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         return len(self.data_list)
-
-    @staticmethod
-    def collate_fn(data_samples):
-        inputs = [item["image"] for item in data_samples]
-
-        if len(inputs) > 0:
-            if isinstance(inputs[0], np.ndarray):
-                inputs = np.stack([item for item in inputs], axis=0)
-            else:
-                inputs = torch.stack([item for item in inputs], dim=0)
-
-        return inputs, data_samples
-
-    @staticmethod
-    def visualize_dataset(
-        data_sample: dict, show: bool = False, return_fig: bool = False
-    ) -> np.ndarray:
-        data = cv2.imread(data_sample["filename"])
-        fig, ax = plt.subplots()
-        ax.imshow(data)
-        title = [f"GT: {data_sample['gt_text']}"]
-        title_kargs = {}
-        if "pred_text" in data_sample:
-            title.append(f"DT: {data_sample['pred_text']}")
-            if data_sample["pred_text"].strip() == data_sample["gt_text"].strip():
-                title_kargs["color"] = "green"
-            else:
-                title_kargs["color"] = "red"
-
-        ax.set_title("\n".join(title), **title_kargs)
-
-        fig.canvas.draw()  # Draw the canvas, cache the renderer
-
-        if show:
-            plt.show()
-            return
-
-        if return_fig:
-            return fig
-
-        # Convert the canvas to a raw RGB buffer
-        buf = fig.canvas.buffer_rgba()
-        ncols, nrows = fig.canvas.get_width_height()
-        image = np.frombuffer(buf, dtype=np.uint8).reshape(nrows, ncols, 4)
-        image = cv2.cvtColor(image, cv2.COLOR_RGBA2RGB)
-
-        return image

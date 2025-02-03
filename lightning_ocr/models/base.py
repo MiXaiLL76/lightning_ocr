@@ -5,6 +5,8 @@ import albumentations as A
 from lightning_ocr.metrics import WordMetric, OneMinusNEDMetric, CharMetric
 from torch.utils.tensorboard import SummaryWriter
 from matplotlib.figure import Figure
+from lightning_ocr.datasets import RecogTextDataModule
+from collections import defaultdict
 
 
 class BaseOcrModel(L.LightningModule):
@@ -17,7 +19,7 @@ class BaseOcrModel(L.LightningModule):
     ):
         self.pretrained_model = config.get("pretrained_model", base_pretrained_model)
         self.init_from_pretrained_model = config.get("init_from_pretrained_model", True)
-        self.max_token_length = config.get("max_seq_len", 40)
+        self.max_token_length = config.get("max_seq_len", 32)
         self.base_config = config
         self.image_size = {"height": image_height, "width": image_width}
         self.base_config = config
@@ -76,6 +78,34 @@ class BaseOcrModel(L.LightningModule):
     ):
         tensorboard: SummaryWriter = self.logger.experiment
         tensorboard.add_figure(tag, figure, global_step)
+
+    def on_validation_batch_end(self, data_samples, batch, batch_idx):
+        if isinstance(data_samples, list):
+            if len(data_samples) > 0 and isinstance(data_samples[0], dict):
+                splited_data_samples = defaultdict(list)
+                for item in data_samples:
+                    splited_data_samples[item.get("_dataset", "dataset")].append(item)
+
+                for metric in self.metrics:
+                    for dataset_name, sub_data_samples in splited_data_samples.items():
+                        metric.process(None, sub_data_samples)
+                        eval_res = metric.evaluate(
+                            size=len(sub_data_samples), prefix=dataset_name
+                        )
+                        self.log_dict(
+                            eval_res,
+                            on_epoch=True,
+                            batch_size=len(sub_data_samples),
+                        )
+
+                for item in data_samples:
+                    prefix = item.get("_dataset", "dataset")
+                    fig = RecogTextDataModule.visualize_dataset(item, return_fig=True)
+                    if fig is not None:
+                        self.log_figure(
+                            f"{prefix}/{item['index']}", fig, self.global_step
+                        )
+                        break
 
     def load_train_pipeline(self):
         train_pipeline = [
