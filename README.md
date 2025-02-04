@@ -4,7 +4,7 @@ lightningOCR is an open-source toolbox based on PyTorch and Lightning-AI for tex
 
 ## Installation
 
-> TODO: 
+> TODO:
 
 ## Examples
 
@@ -16,9 +16,9 @@ lightningOCR is an open-source toolbox based on PyTorch and Lightning-AI for tex
 
 ## [Model Zoo](./lightning_ocr/models)
 
-- [x] [ABINet](./lightning_ocr/models/abinet.py) (CVPR 2021) from [MMOCR](https://github.com/open-mmlab/mmocr/blob/main/configs/textrecog/abinet/README.md)  
-- [x] [MGP-STR](./lightning_ocr/models/mgp_str.py) (ECCV 2022) from [transformers](https://huggingface.co/docs/transformers/model_doc/mgp-str)  
-- [x] [TrOCR](./lightning_ocr/models/trocr.py) from [transformers](https://huggingface.co/docs/transformers/model_doc/trocr)  
+- [x] [ABINet](./lightning_ocr/models/abinet.py) (CVPR 2021) from [MMOCR](https://github.com/open-mmlab/mmocr/blob/main/configs/textrecog/abinet/README.md)
+- [x] [MGP-STR](./lightning_ocr/models/mgp_str.py) (ECCV 2022) from [transformers](https://huggingface.co/docs/transformers/model_doc/mgp-str)
+- [x] [TrOCR](./lightning_ocr/models/trocr.py) from [transformers](https://huggingface.co/docs/transformers/model_doc/trocr)
 
 ## Citation
 

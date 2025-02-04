@@ -4,6 +4,7 @@ import numpy as np
 import PIL.Image
 import json
 
+
 class Resampling(IntEnum):
     NEAREST = 0
     BOX = 4
@@ -12,7 +13,8 @@ class Resampling(IntEnum):
     BICUBIC = 3
     LANCZOS = 1
 
-class ImageProcessor():
+
+class ImageProcessor:
     def __init__(
         self,
         do_resize: bool = True,
@@ -26,7 +28,7 @@ class ImageProcessor():
         do_convert_rgb: Optional[bool] = None,
     ) -> None:
         size = size if size is not None else {"height": 224, "width": 224}
-        
+
         if not isinstance(size, dict):
             if isinstance(size, int):
                 size = {"height": size, "width": size}
@@ -36,7 +38,7 @@ class ImageProcessor():
                 raise ValueError(
                     f"Could not convert size input to size dict: {size}. Size must be an int, tuple or dict."
                 )
-            
+
         self.do_resize = do_resize
         self.do_rescale = do_rescale
         self.do_normalize = do_normalize
@@ -48,36 +50,43 @@ class ImageProcessor():
         self.do_convert_rgb = do_convert_rgb
 
     @classmethod
-    def load_from_file(cls, file : str):
+    def load_from_file(cls, file: str):
         with open(file, "r") as f:
             kwargs = json.load(f)
-        
+
         if "image_processor_type" in kwargs:
-            del kwargs["image_processor_type"]    
+            del kwargs["image_processor_type"]
 
         if "processor_class" in kwargs:
-            del kwargs["processor_class"] 
-           
+            del kwargs["processor_class"]
+
         return cls(**kwargs)
 
     @staticmethod
     def batch_images(images):
         if isinstance(images, PIL.Image.Image):
             return [images], False
-        
+
         elif isinstance(images, np.ndarray) and len(images.shape) == 3:
             return [images], False
-        
-        elif isinstance(images, list) and len(images) > 0 and (isinstance(images[0], PIL.Image.Image) or isinstance(images[0], np.ndarray)):
+
+        elif (
+            isinstance(images, list)
+            and len(images) > 0
+            and (
+                isinstance(images[0], PIL.Image.Image)
+                or isinstance(images[0], np.ndarray)
+            )
+        ):
             return images, True
-        
+
         elif isinstance(images, np.ndarray) and len(images.shape) == 4:
             return images, True
         else:
             raise ValueError(
                 "Images must be a PIL image, a numpy array, or a list of PIL images/numpy arrays."
             )
-    
+
     @staticmethod
     def convert_to_rgb(image):
         if not isinstance(image, PIL.Image.Image):
@@ -88,7 +97,7 @@ class ImageProcessor():
 
         image = image.convert("RGB")
         return image
-    
+
     @staticmethod
     def to_numpy_array(img) -> np.ndarray:
         if isinstance(img, PIL.Image.Image):
@@ -96,31 +105,38 @@ class ImageProcessor():
         return np.array(img)
 
     def resize(self, img):
-        return np.array(PIL.Image.fromarray(img).resize((self.size["width"], self.size["height"]), resample=self.resample))
+        return np.array(
+            PIL.Image.fromarray(img).resize(
+                (self.size["width"], self.size["height"]), resample=self.resample
+            )
+        )
 
     def rescale(self, img):
         rescaled_image = img.astype(np.float64) * self.rescale_factor
         return rescaled_image
-    
+
     def preprocess(self, images):
         images, is_batched = ImageProcessor.batch_images(images)
 
         if self.do_convert_rgb:
             images = [ImageProcessor.convert_to_rgb(image) for image in images]
-        
+
         # All transformations expect numpy arrays.
         images = [ImageProcessor.to_numpy_array(image) for image in images]
-        
+
         if self.do_resize:
             images = [self.resize(img=image) for image in images]
-        
+
         if self.do_rescale:
             images = [self.rescale(img=image) for image in images]
-        
+
         if self.do_normalize:
             images = [
-                (image - np.array(self.image_mean) * 255) / (np.array(self.image_std) * 255)
+                (image - np.array(self.image_mean) * 255)
+                / (np.array(self.image_std) * 255)
                 for image in images
             ]
-        
-        return [image.transpose(2, 0, 1).astype(np.float32) for image in images], is_batched
+
+        return [
+            image.transpose(2, 0, 1).astype(np.float32) for image in images
+        ], is_batched

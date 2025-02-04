@@ -2,11 +2,12 @@ import unittest
 
 import torch
 
-from lightning_ocr.modules.encoders.channel_reduction_encoder import ChannelReductionEncoder
+from lightning_ocr.modules.encoders.channel_reduction_encoder import (
+    ChannelReductionEncoder,
+)
 
 
 class TestChannelReductionEncoder(unittest.TestCase):
-
     def setUp(self):
         self.feat = torch.randn(2, 512, 8, 25)
 

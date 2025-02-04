@@ -6,7 +6,6 @@ from lightning_ocr.modules.backbones.resnet31_ocr import ResNet31OCR
 
 
 class TestResNet31OCR(TestCase):
-
     def test_forward(self):
         """Test resnet backbone."""
         with self.assertRaises(ValueError):

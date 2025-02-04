@@ -1,9 +1,12 @@
 from typing import Optional
 from lightning_ocr.modules.layers.position_aware_layer import PositionAwareLayer
-from lightning_ocr.modules.layers.dot_product_attention_layer import DotProductAttentionLayer
+from lightning_ocr.modules.layers.dot_product_attention_layer import (
+    DotProductAttentionLayer,
+)
 
 import torch
 import torch.nn as nn
+
 
 class PositionAttentionDecoder(nn.Module):
     """Position attention decoder for RobustScanner.
@@ -27,15 +30,16 @@ class PositionAttentionDecoder(nn.Module):
             ``feat`` will be used. Defaults to False.
     """
 
-    def __init__(self,
-                 num_classes: int = 37,
-                 rnn_layers: int = 2,
-                 dim_input: int = 512,
-                 dim_model: int = 128,
-                 max_seq_len: int = 40,
-                 return_feature: bool = True,
-                 encode_value: bool = False
-        ) -> None:
+    def __init__(
+        self,
+        num_classes: int = 37,
+        rnn_layers: int = 2,
+        dim_input: int = 512,
+        dim_model: int = 128,
+        max_seq_len: int = 40,
+        return_feature: bool = True,
+        encode_value: bool = False,
+    ) -> None:
         super().__init__()
         self.max_seq_len = max_seq_len
         self.dim_input = dim_input
@@ -45,21 +49,20 @@ class PositionAttentionDecoder(nn.Module):
 
         self.embedding = nn.Embedding(self.max_seq_len + 1, self.dim_model)
 
-        self.position_aware_module = PositionAwareLayer(
-            self.dim_model, rnn_layers)
+        self.position_aware_module = PositionAwareLayer(self.dim_model, rnn_layers)
 
         self.attention_layer = DotProductAttentionLayer()
 
         self.prediction = None
         if not self.return_feature:
-            self.prediction = nn.Linear(dim_model if encode_value else dim_input, num_classes)
+            self.prediction = nn.Linear(
+                dim_model if encode_value else dim_input, num_classes
+            )
         self.softmax = nn.Softmax(dim=-1)
 
-    def _get_position_index(self,
-                            length: int,
-                            batch_size: int,
-                            device: Optional[torch.device] = None
-                            ) -> torch.Tensor:
+    def _get_position_index(
+        self, length: int, batch_size: int, device: Optional[torch.device] = None
+    ) -> torch.Tensor:
         """Get position index for position attention.
 
         Args:
@@ -97,8 +100,7 @@ class PositionAttentionDecoder(nn.Module):
         assert c_enc == self.dim_model
         _, c_feat, _, _ = feat.size()
         assert c_feat == self.dim_input
-        position_index = self._get_position_index(self.max_seq_len, n,
-                                                  feat.device)
+        position_index = self._get_position_index(self.max_seq_len, n, feat.device)
 
         position_out_enc = self.position_aware_module(out_enc)
 
@@ -117,4 +119,5 @@ class PositionAttentionDecoder(nn.Module):
             return attn_out
 
         return self.prediction(attn_out)
+
     #   return self.softmax(self.prediction(attn_out))

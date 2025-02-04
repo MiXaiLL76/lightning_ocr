@@ -62,26 +62,6 @@ class ABINetVision(BaseOcrModel):
             **dict(vit_processor_cfg, **config.get("processor", {}))
         )
 
-    def configure_optimizers(self):
-        optimizer = torch.optim.Adam(
-            self.parameters(),
-            lr=self.base_config.get("lr", 1e-04),
-        )
-
-        scheduler = {
-            "scheduler": torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer,
-                T_max=self.trainer.max_epochs
-                * len(self.trainer.fit_loop._data_source.instance),
-                eta_min=1e-7,
-            ),
-            "interval": "step",
-            "frequency": 1,
-            "name": "CosineAnnealingLR",
-        }
-
-        return [optimizer], [scheduler]
-
     def load_mmocr_model(self, model_path):
         if "http" in model_path:
             import os

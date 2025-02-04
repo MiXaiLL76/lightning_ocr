@@ -45,30 +45,22 @@ class BaseOcrModel(L.LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(
             self.parameters(),
-            lr=self.base_config.get("lr", 2e-05),
+            lr=self.base_config.get("lr", 1e-04),
         )
 
-        scheduler1 = {
-            "scheduler": torch.optim.lr_scheduler.LinearLR(
+        scheduler = {
+            "scheduler": torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
-                start_factor=0.9,
-                total_iters=2 * len(self.trainer.fit_loop._data_source.instance),
+                T_max=self.trainer.max_epochs
+                * len(self.trainer.fit_loop._data_source.instance),
+                eta_min=1e-7,
             ),
             "interval": "step",
             "frequency": 1,
-            "name": "LinearLR",
+            "name": "CosineAnnealingLR",
         }
 
-        scheduler2 = {
-            "scheduler": torch.optim.lr_scheduler.MultiStepLR(
-                optimizer, milestones=[16, 18], last_epoch=self.trainer.max_epochs
-            ),
-            "interval": "epoch",
-            "frequency": 1,
-            "name": "MultiStepLR",
-        }
-
-        return [optimizer], [scheduler1, scheduler2]
+        return [optimizer], [scheduler]
 
     def log_figure(
         self,
@@ -123,6 +115,7 @@ class BaseOcrModel(L.LightningModule):
                                 p=1.0,
                             ),
                             A.Perspective(scale=(0.05, 0.1), fit_output=True, p=1.0),
+                            A.RandomRotate90(p=1.0),
                         ],
                         1,
                     )

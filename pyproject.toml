@@ -36,6 +36,8 @@ rapidfuzz = { version = "*" }
 onnxruntime = { version = "*" }
 onnx = { version = "*" }
 tensorboard = { version = "*" }
+tiktoken = {version = "*"} # TROCR
+sentencepiece = {version = "*"} # TROCR
 
 [build-system]
 requires = ["poetry-core"]

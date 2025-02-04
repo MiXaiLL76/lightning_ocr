@@ -8,8 +8,7 @@ from transformers import (
     VisionEncoderDecoderConfig,
 )
 import typing
-import albumentations as A
-from lightning_ocr.datasets import RecogTextDataset, RecogTextDataModule
+from lightning_ocr.datasets import HuggingFaceOCRDataset, RecogTextDataModule
 from lightning_ocr.tokenizer import FastTokenizer
 from lightning_ocr.models.base import BaseOcrModel
 
@@ -25,6 +24,7 @@ class TrOCR(BaseOcrModel):
         )
 
         self.processor = TrOCRProcessor.from_pretrained(self.pretrained_model)
+        self.processor.image_processor.size = self.image_size
 
         if config.get("tokenizer") is not None:
             self.processor.tokenizer = FastTokenizer(**config.get("tokenizer", {}))
@@ -74,8 +74,14 @@ class TrOCR(BaseOcrModel):
             json.dump(self.base_config, f, indent=4)
 
         self.processor.save_pretrained(output_folder)
+        self.processor.tokenizer.save_pretrained(output_folder)
+        with open(f"{output_folder}/vocab.json", "w") as fd:
+            json.dump(self.processor.tokenizer.vocab, fd)
+
         self.model.save_pretrained(output_folder, state_dict={})
-        os.remove(f"{output_folder}/model.safetensors")
+
+        if os.path.exists(f"{output_folder}/model.safetensors"):
+            os.remove(f"{output_folder}/model.safetensors")
 
     @classmethod
     def load_from_folder(cls, folder, model_file: typing.Optional[str] = "latest"):
@@ -152,59 +158,20 @@ class TrOCR(BaseOcrModel):
         generated_ids = self.model.generate(
             pixel_values, max_new_tokens=self.max_token_length
         )
-        return generated_ids
-
-    def on_validation_batch_end(self, outputs, batch, batch_idx):
-        inputs, data_samples = batch
 
         generated_texts = self.processor.tokenizer.batch_decode(
-            outputs, skip_special_tokens=True
+            generated_ids, skip_special_tokens=True
         )
         for idx, data_sample in enumerate(data_samples):
             data_sample["pred_text"] = generated_texts[idx]
 
-        for metric in self.metrics:
-            metric.process(None, data_samples)
-            eval_res = metric.evaluate(size=len(data_samples))
-            self.log_dict(
-                eval_res,
-                on_epoch=True,
-                prog_bar=True,
-                batch_size=len(data_samples),
-            )
-
-        for data_sample in data_samples:
-            fig = RecogTextDataset.visualize_dataset(data_sample, return_fig=True)
-            self.log_figure(
-                f"data_samples/{data_sample['index']}", fig, self.global_step
-            )
-            break
+        return data_samples
 
     def forward(self, inputs: torch.Tensor):
         generated_ids = self.model.generate(
             inputs, max_new_tokens=self.max_token_length
         )
         return generated_ids
-
-    def to_onnx(self, file_path: str, **kwargs: typing.Any) -> None:
-        input_sample = torch.randn(
-            2, 3, self.image_size["height"], self.image_size["width"]
-        )
-
-        torch.onnx.export(
-            self,
-            input_sample,
-            file_path,
-            input_names=["input"],
-            output_names=["output", "out_enc", "attn_scores"],
-            dynamic_axes={
-                "input": {0: "batch_size"},
-                "output": {0: "batch_size"},
-                "out_enc": {0: "batch_size"},
-                "attn_scores": {0: "batch_size"},
-            },
-            **kwargs,
-        )
 
 
 if __name__ == "__main__":
@@ -213,28 +180,85 @@ if __name__ == "__main__":
     import os
 
     os.environ["TOKENIZERS_PARALLELISM"] = "true"
+
     batch_size = 8
 
-    # https://huggingface.co/microsoft/trocr-small-printed/tree/main
-    small_cfg = {
+    config = {
         "tokenizer": {
-            "dict_list": list("0123456789."),
+            "dict_list": list("0123456789.-;:"),
         },
-        "pretrained_model": "microsoft/trocr-small-printed",
     }
-    model = TrOCR(small_cfg)
+
+    model = TrOCR(config)
 
     tb_logger = TensorBoardLogger(save_dir="logs/TrOCR")
 
-    train_dataset = RecogTextDataset(
-        data_root="/home/mixaill76/text_datasets/data_collection/005-CV",
-        ann_file="ann_file.json",
-        pipeline=model.load_train_pipeline(),
-    )
+    train_datasets = [
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/7SEG_OCR", split="train", pipeline=model.load_train_pipeline()
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/SVHN_OCR", split="train", pipeline=model.load_train_pipeline()
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/CTW1500_OCR",
+            split="train_numbers",
+            pipeline=model.load_train_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/ICDAR2013_OCR",
+            split="train_numbers",
+            pipeline=model.load_train_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/ICDAR2015_OCR",
+            split="train_numbers",
+            pipeline=model.load_train_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/TextOCR_OCR",
+            split="train_numbers",
+            pipeline=model.load_train_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/CTW1500_OCR",
+            split="train_numbers",
+            pipeline=model.load_train_pipeline(),
+        ),
+    ]
 
-    log_every_n_steps = 50
-    if len(train_dataset) // batch_size < 50:
-        log_every_n_steps = 5
+    eval_datasets = [
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/SVHN_OCR", split="test", pipeline=model.load_test_pipeline()
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/CTW1500_OCR",
+            split="test_numbers",
+            pipeline=model.load_test_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/ICDAR2013_OCR",
+            split="test_numbers",
+            pipeline=model.load_test_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/ICDAR2015_OCR",
+            split="test_numbers",
+            pipeline=model.load_test_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/TextOCR_OCR",
+            split="test_numbers",
+            pipeline=model.load_test_pipeline(),
+        ),
+        HuggingFaceOCRDataset(
+            "MiXaiLL76/CTW1500_OCR",
+            split="test_numbers",
+            pipeline=model.load_test_pipeline(),
+        ),
+    ]
+
+    log_every_n_steps = 100
 
     checkpoint_callback = ModelCheckpoint(
         dirpath="./checkpoints/TrOCR",
@@ -246,33 +270,20 @@ if __name__ == "__main__":
     )
 
     trainer = L.Trainer(
-        precision="16",
+        precision="16-mixed",
         logger=tb_logger,
         log_every_n_steps=log_every_n_steps,
         callbacks=[checkpoint_callback],
         max_epochs=20,
-        # accumulate_grad_batches=batch_size,
     )
-
-    from sklearn.model_selection import train_test_split
-    import copy
-
-    TRAIN, TEST = train_test_split(
-        train_dataset.data_list, test_size=0.2, random_state=42
-    )
-
-    test_dataset = copy.deepcopy(train_dataset)
-    test_dataset.data_list = TEST
-    test_dataset.transform = A.Compose(model.load_test_pipeline())
-    train_dataset.data_list = TRAIN
 
     model.dump_config(checkpoint_callback.dirpath)
 
     trainer.fit(
         model,
         datamodule=RecogTextDataModule(
-            train_datasets=[train_dataset],
-            eval_datasets=[test_dataset],
+            train_datasets=train_datasets,
+            eval_datasets=eval_datasets,
             batch_size=batch_size,
         ),
     )
