@@ -101,7 +101,6 @@ class BaseOcrModel(L.LightningModule):
 
     def load_train_pipeline(self):
         train_pipeline = [
-            A.Resize(self.image_size["height"], self.image_size["width"]),
             A.Compose(
                 [  # RandomApply
                     A.OneOf(
@@ -136,6 +135,7 @@ class BaseOcrModel(L.LightningModule):
                 hue=(-0.1, 0.1),
                 p=0.25,
             ),
+            A.Resize(self.image_size["height"], self.image_size["width"]),
         ]
         return train_pipeline
 
